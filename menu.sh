@@ -63,6 +63,7 @@ add_ssh() {
   days="$(ask_days)" || return
   useradd -m -s /bin/bash "${user}" >/dev/null 2>&1 || { err "gagal membuat user"; return; }
   printf '%s:%s\n' "${user}" "${pass}" | chpasswd >/dev/null 2>&1 || { err "gagal set password"; return; }
+  mkdir -p "${ACC}/ssh"
   echo "$(days_to_epoch "${days}")" > "${ACC}/ssh/${user}.exp"
   msg "akun SSH dibuat"
   printf "  host     : %s\n  port     : %s / %s\n  username : %s\n  password : %s\n  expired  : %s\n" \
@@ -106,6 +107,7 @@ add_xray() {
   days="$(ask_days)" || return
   uuid="$(cat /proc/sys/kernel/random/uuid)"
   exp="$(days_to_epoch "${days}")"
+  mkdir -p "${ACC}/xray/${proto}"
   printf 'uuid=%s\nexp=%s\ncreated=%s\n' "${uuid}" "${exp}" "$(date +%s)" \
     > "${ACC}/xray/${proto}/${name}"
   sync_xray || return
