@@ -1,0 +1,11 @@
+[Unit]
+Description=jnctunnel expire accounts every 5 minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitInactiveSec=5min
+AccuracySec=30s
+Unit=jnctunnel-expire.service
+
+[Install]
+WantedBy=timers.target

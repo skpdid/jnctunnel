@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+# jnctunnel - hapus akun yang masa aktifnya habis (dipanggil timer 5 menit)
+set -uo pipefail
+
+ACC_DIR="${JNCT_ACC:-/etc/jnctunnel/accounts}"
+XRAY_SYNC="${JNCT_SYNC:-/usr/local/sbin/xray-sync.py}"
+now="$(date +%s)"
+xray_changed=0
+
+log() { logger -t jnctunnel "$*" 2>/dev/null || true; }
+
+# ---------- akun SSH ----------
+if [ -d "${ACC_DIR}/ssh" ]; then
+  for meta in "${ACC_DIR}"/ssh/*.exp; do
+    [ -e "${meta}" ] || continue
+    user="$(basename "${meta}" .exp)"
+    exp="$(tr -cd '0-9' < "${meta}")"
+    [ -n "${exp}" ] || continue
+    [ "${exp}" = "0" ] && continue
+    if [ "${exp}" -le "${now}" ]; then
+      pkill -KILL -u "${user}" 2>/dev/null || true
+      userdel -r "${user}" 2>/dev/null || true
+      rm -f "${meta}"
+      log "akun SSH ${user} kedaluwarsa, dihapus"
+    fi
+  done
+fi
+
+# ---------- akun Xray ----------
+for proto in vmess vless trojan; do
+  dir="${ACC_DIR}/xray/${proto}"
+  [ -d "${dir}" ] || continue
+  for meta in "${dir}"/*; do
+    [ -f "${meta}" ] || continue
+    exp="$(awk -F= '$1=="exp"{print $2}' "${meta}" | tr -cd '0-9')"
+    [ -n "${exp}" ] || continue
+    [ "${exp}" = "0" ] && continue
+    if [ "${exp}" -le "${now}" ]; then
+      rm -f "${meta}"
+      xray_changed=1
+      log "akun ${proto} $(basename "${meta}") kedaluwarsa, dihapus"
+    fi
+  done
+done
+
+if [ "${xray_changed}" = "1" ] && [ -x "${XRAY_SYNC}" ]; then
+  if python3 "${XRAY_SYNC}"; then
+    systemctl restart jnctunnel-xray 2>/dev/null || true
+  fi
+fi
+
+exit 0

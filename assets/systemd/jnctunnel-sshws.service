@@ -1,0 +1,18 @@
+[Unit]
+Description=jnctunnel SSH over WebSocket
+After=network-online.target dropbear.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /usr/local/sbin/sshws.py --listen 127.0.0.1:2082 --target 127.0.0.1:109
+Restart=always
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+LimitNOFILE=32768
+StandardOutput=null
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

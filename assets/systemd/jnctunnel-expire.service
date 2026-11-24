@@ -1,0 +1,6 @@
+[Unit]
+Description=jnctunnel expire accounts
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/jnctunnel-expire
