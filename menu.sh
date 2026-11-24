@@ -7,6 +7,7 @@ CONF="${JNCT_CONF:-/etc/jnctunnel/config.env}"
 ACC="${JNCT_ACC:-/etc/jnctunnel/accounts}"
 XRAY_SYNC="${JNCT_SYNC:-/usr/local/sbin/xray-sync.py}"
 
+# shellcheck disable=SC1090
 [ -f "${CONF}" ] && . "${CONF}"
 : "${DOMAIN:=}"
 : "${DEFAULT_DAYS:=30}"

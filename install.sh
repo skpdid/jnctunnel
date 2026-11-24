@@ -7,7 +7,6 @@ set -euo pipefail
 
 REPO="${JNCTUNNEL_REPO:-https://github.com/skpdid/jnctunnel.git}"
 BRANCH="${JNCTUNNEL_BRANCH:-main}"
-SRC_DIR="/opt/jnctunnel-src"
 
 [ "$(id -u)" -eq 0 ] || { echo "jalankan sebagai root"; exit 1; }
 
