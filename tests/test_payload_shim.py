@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Uji payload shim: mode tunnel (decoy + PATCH + magic) dan mode fallback nginx."""
+"""Uji payload shim: decoy, tunnel (PATCH + magic), dan fallback nginx."""
 import os
 import socket
 import subprocess
@@ -13,14 +13,16 @@ SHIM_PORT = 17007
 UPSTREAM_PORT = 17004
 NGINX_PORT = 18083
 
-PAYLOAD = (
-    b"GET / HTTP/1.1\r\nHost: chat.sociomile.com\r\n\r\n"
-    b"PATCH / HTTP/1.1\r\nHost: vpn.contoh.com\r\nUpgrade: websocket\r\n\r\n"
-)
+DECOY = b"GET / HTTP/1.1\r\nHost: chat.sociomile.com\r\n\r\n"
+UPGRADE = b"PATCH / HTTP/1.1\r\nHost: vpn.contoh.com\r\nUpgrade: websocket\r\n\r\n"
 MAGIC = b"HTTP/ 69\r\n\r\n"
+NGINX_BODY = b"<!DOCTYPE html><h3>Config by 1FTunnel</h3>"
+NGINX_RESP = (b"HTTP/1.1 301 Moved Permanently\r\nServer: nginx\r\nContent-Length: %d\r\n"
+              b"Connection: keep-alive\r\nLocation: https://chat.sociomile.com/\r\n\r\n" % len(NGINX_BODY))
+UPGRADE_RESP = b"HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n"
 
 
-def serve_echo(port, response=b"HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n", sink=None):
+def serve(port, response, sink, echo):
     srv = socket.socket()
     srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     srv.bind(("127.0.0.1", port))
@@ -32,21 +34,20 @@ def serve_echo(port, response=b"HTTP/1.1 101 Switching Protocols\r\nUpgrade: web
                 conn, _ = srv.accept()
             except OSError:
                 return
-            data = b""
-            conn.settimeout(3)
             try:
+                conn.settimeout(3)
+                data = b""
                 while b"\r\n\r\n" not in data:
                     chunk = conn.recv(4096)
                     if not chunk:
                         break
                     data += chunk
-                if sink is not None:
-                    sink.append(data)
+                sink.append(data)
                 conn.sendall(response)
-                body = conn.recv(64)
-                if sink is not None:
+                if echo:
+                    body = conn.recv(64)
                     sink.append(body)
-                conn.sendall(body)
+                    conn.sendall(body)
             except OSError:
                 pass
             finally:
@@ -56,7 +57,7 @@ def serve_echo(port, response=b"HTTP/1.1 101 Switching Protocols\r\nUpgrade: web
     return srv
 
 
-def read_all(sock, limit=4096):
+def read_some(sock, limit=4096):
     sock.settimeout(3)
     out = b""
     try:
@@ -73,8 +74,8 @@ def read_all(sock, limit=4096):
 def main():
     upstream_seen = []
     nginx_seen = []
-    serve_echo(UPSTREAM_PORT, sink=upstream_seen)
-    serve_echo(NGINX_PORT, response=b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok", sink=nginx_seen)
+    serve(UPSTREAM_PORT, UPGRADE_RESP, upstream_seen, echo=True)
+    serve(NGINX_PORT, NGINX_RESP + NGINX_BODY, nginx_seen, echo=False)
 
     env = dict(os.environ)
     env["JNCT_SHIM_LISTEN"] = "127.0.0.1:%d" % SHIM_PORT
@@ -85,29 +86,33 @@ def main():
                             stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
     time.sleep(1.0)
 
-    # route /upvmess harus menuju UPSTREAM_PORT; shim memakai peta bawaan,
-    # jadi untuk uji ini peta diarahkan lewat variabel lingkungan tambahan.
     results = []
     try:
-        # 1. mode tunnel: decoy + PATCH + magic
+        # 1. decoy saja -> respons nginx (301) diteruskan, koneksi tetap hidup
         s = socket.create_connection(("127.0.0.1", SHIM_PORT), 5)
-        s.sendall(PAYLOAD)
-        time.sleep(0.3)
+        s.sendall(b"PROXY TCP4 1.2.3.4 5.6.7.8 1234 80\r\n" + DECOY)
+        resp = read_some(s)
+        results.append(("decoy-301", b"301" in resp and NGINX_BODY in resp))
+        results.append(("proxy-header", bool(nginx_seen) and nginx_seen[0].startswith(b"PROXY TCP4 1.2.3.4")))
+
+        # 2. pola 1FTunnel: tunggu respons decoy, lalu kirim upgrade + magic
+        s.sendall(UPGRADE)
+        time.sleep(0.2)
         s.sendall(MAGIC + b"HELLO")
-        resp = read_all(s)
+        resp2 = read_some(s)
         s.close()
-        results.append(("tunnel", b"101" in resp))
+        results.append(("tunnel-101", b"101" in resp2))
         body = upstream_seen[1] if len(upstream_seen) > 1 else b""
         results.append(("magic-strip", body.strip() == b"HELLO"))
 
-        # 2. fallback nginx: request biasa
+        # 3. decoy + upgrade dikirim sekaligus
         s = socket.create_connection(("127.0.0.1", SHIM_PORT), 5)
-        s.sendall(b"PROXY TCP4 1.2.3.4 5.6.7.8 1234 443\r\n"
-                  b"GET /vps/health HTTP/1.1\r\nHost: vpn.contoh.com\r\n\r\n")
-        resp2 = read_all(s)
+        s.sendall(DECOY + UPGRADE)
+        time.sleep(0.2)
+        s.sendall(MAGIC + b"BULK")
+        resp3 = read_some(s)
         s.close()
-        results.append(("fallback", b"200" in resp2))
-        results.append(("proxy-header", bool(nginx_seen) and nginx_seen[0].startswith(b"PROXY TCP4 1.2.3.4")))
+        results.append(("bulk-101", b"101" in resp3))
     finally:
         proc.terminate()
         proc.wait(timeout=5)

@@ -35,7 +35,6 @@ DEFAULT_ROUTE = os.environ.get("JNCT_SHIM_DEFAULT", "/upvmess")
 MAGIC = b"HTTP/ 69\r\n\r\n"
 HEADER_LIMIT = 64 * 1024
 HANDSHAKE_TIMEOUT = 8.0
-DECOY_GRACE = 1.5
 MAX_CONNECTIONS = int(os.environ.get("JNCT_SHIM_MAX_CONN", "2048"))
 
 ROUTES = {
@@ -230,21 +229,54 @@ def handle_tunnel(downstream, req, leftover):
             pass
 
 
-def proxy_to_nginx(downstream, buffered, src):
+def read_response(sock):
+    """Baca satu respons HTTP: header + body sesuai Content-Length."""
+    head, rest = read_response_head(sock)
+    if head is None:
+        return None, b""
+    length = 0
+    for line in head.split(b"\r\n")[1:]:
+        name, _, value = line.partition(b":")
+        if name.strip().lower() == b"content-length":
+            try:
+                length = int(value.strip())
+            except ValueError:
+                length = 0
+    body = rest
+    while len(body) < length:
+        try:
+            chunk = sock.recv(65536)
+        except OSError:
+            break
+        if not chunk:
+            break
+        body += chunk
+    return head, body[:length] if length else body
+
+
+def forward_http_once(downstream, raw, src):
+    """Teruskan satu request (umpan/normal) ke nginx, balikan responsnya.
+
+    Koneksi klien TIDAK ditutup: setelah respons umpan terkirim, shim tetap
+    membaca request berikutnya di koneksi yang sama - di situlah request
+    upgrade (PATCH/GET + Upgrade: websocket) biasanya menyusul.
+    """
     host, _, port = NGINX.partition(":")
     try:
         upstream = socket.create_connection((host, int(port)), HANDSHAKE_TIMEOUT)
     except OSError:
         downstream.sendall(b"HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
-        return
+        return False
     try:
-        upstream.settimeout(None)
-        upstream.sendall(proxy_header(src) + buffered)
-        downstream.settimeout(None)
-        upload = threading.Thread(target=pump, args=(downstream, upstream), daemon=True)
-        upload.start()
-        pump(upstream, downstream)
-        upload.join(timeout=1.0)
+        upstream.settimeout(HANDSHAKE_TIMEOUT)
+        upstream.sendall(proxy_header(src) + raw)
+        head, body = read_response(upstream)
+        if head is None:
+            return False
+        downstream.sendall(head + b"\r\n\r\n" + body)
+        return True
+    except OSError:
+        return False
     finally:
         try:
             upstream.close()
@@ -259,43 +291,49 @@ def handle(downstream, slots):
 
         buf = b""
         deadline = time.time() + HANDSHAKE_TIMEOUT
-        grace_until = None
-        first_seen = False
-
-        while time.time() < deadline:
-            try:
-                chunk = downstream.recv(8192)
-            except socket.timeout:
-                break
-            except OSError:
-                return
-            if not chunk:
-                break
-            buf += chunk
-            if len(buf) > HEADER_LIMIT:
-                break
-
-            blocks = split_requests(buf)
-            if blocks and not first_seen:
-                first_seen = True
-                first = parse_block(blocks[0][0])
-                if not (first and is_upgrade(first)):
-                    # kemungkinan request umpan: beri kesempatan request kedua datang
-                    grace_until = time.time() + DECOY_GRACE
-
-            for head, end in blocks:
-                req = parse_block(head)
-                if req and is_upgrade(req):
-                    handle_tunnel(downstream, req, buf[end:])
+        while True:
+            while b"\r\n\r\n" not in buf:
+                if len(buf) > HEADER_LIMIT or time.time() > deadline:
                     return
+                try:
+                    chunk = downstream.recv(8192)
+                except socket.timeout:
+                    return
+                except OSError:
+                    return
+                if not chunk:
+                    return
+                buf += chunk
 
-            if grace_until and time.time() >= grace_until:
-                break
-            downstream.settimeout(0.2 if grace_until else max(0.1, deadline - time.time()))
+            head, _, rest = buf.partition(b"\r\n\r\n")
+            req = parse_block(head)
+            if req is None:
+                return
 
-        if not buf:
-            return
-        proxy_to_nginx(downstream, buf, src)
+            length = 0
+            for value in req["headers"].get("content-length", []):
+                try:
+                    length = int(value)
+                except ValueError:
+                    length = 0
+            while len(rest) < length:
+                try:
+                    chunk = downstream.recv(65536)
+                except OSError:
+                    break
+                if not chunk:
+                    break
+                rest += chunk
+            body, rest = rest[:length], rest[length:]
+
+            if is_upgrade(req):
+                handle_tunnel(downstream, req, rest)
+                return
+
+            if not forward_http_once(downstream, head + b"\r\n\r\n" + body, src):
+                return
+            buf = rest
+            deadline = time.time() + HANDSHAKE_TIMEOUT
     except OSError:
         pass
     finally:
