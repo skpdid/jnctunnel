@@ -238,7 +238,8 @@ online() {
 
 restart_all() {
   hr; echo "RESTART LAYANAN"; hr
-  for s in dropbear nginx haproxy jnctunnel-apiguard jnctunnel-xray jnctunnel-sshws jnctunnel-api; do
+  for s in dropbear nginx haproxy jnctunnel-apiguard jnctunnel-xray jnctunnel-sshws jnctunnel-api \
+           jnctunnel-udpgw@7200 jnctunnel-udpgw@7300; do
     if systemctl restart "${s}" 2>/dev/null; then msg "${s} ok"; else err "${s} gagal"; fi
   done
 }
@@ -247,7 +248,8 @@ status_all() {
   hr; echo "STATUS LAYANAN"; hr
   local st
   for s in dropbear nginx haproxy jnctunnel-apiguard jnctunnel-xray jnctunnel-sshws \
-           jnctunnel-api jnctunnel-expire.timer jnctunnel-backup.timer; do
+           jnctunnel-api jnctunnel-udpgw@7200 jnctunnel-udpgw@7300 \
+           jnctunnel-expire.timer jnctunnel-backup.timer; do
     st="$(systemctl is-active "${s}" 2>/dev/null)"
     printf "  %-22s %s\n" "${s}" "${st:-unknown}"
   done

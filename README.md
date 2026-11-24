@@ -22,6 +22,8 @@ berat — semua kode bisa dibaca dalam beberapa menit.
 - **API akun** (JSON, token Bearer) untuk bot/panel di `127.0.0.1:8088`,
   diakses lewat nginx `/vps/`
 - **Backup harian** otomatis (03:30) + `jnctunnel-backup restore`
+- **udpgw badvpn** di port `7200` dan `7300` untuk UDP di sesi SSH/SSHWS
+  (VC, game, DNS)
 - **Kedaluwarsa otomatis** lewat systemd timer 5 menit
 - **Uninstaller** yang mengembalikan konfigurasi nginx/haproxy
 
@@ -53,10 +55,29 @@ Setelah selesai, jalankan `menu`.
 | 10004-10006 | Xray | HTTPUpgrade |
 | 11001-11003 | Xray | gRPC |
 | 12002 | Xray | XHTTP |
+| 7200 | udpgw | UDP gateway untuk SSH/SSHWS |
+| 7300 | udpgw | UDP gateway untuk SSH/SSHWS |
 | 8088 | jnctunnel-api | API akun (lokal, token Bearer) |
 | 10085 | Xray API | HandlerService untuk hot-add (dijaga iptables) |
 
 Semua port 2082/8083/8081/10001-12002 hanya listen di `127.0.0.1`.
+
+## udpgw (badvpn)
+
+Dua instance `jnctunnel-udpgw@7200` dan `jnctunnel-udpgw@7300` (unit template),
+listen `0.0.0.0`, maksimum 256 client dan 32 koneksi per client. Klien tinggal
+mengisi port UDPGW `7200` atau `7300` di aplikasi tunnel-nya.
+
+Debian 12 tidak lagi punya paket `badvpn`, jadi installer mencoba apt lalu
+build dari source (`cmake`, `gcc`, `git`) saat instalasi — perlu koneksi ke
+GitHub **hanya pada saat install**, sesudahnya biner sudah ada di
+`/usr/local/bin/badvpn-udpgw`. Kalau build gagal, port 7200/7300 dilewati dan
+sisa layanan tetap jalan.
+
+```bash
+systemctl status jnctunnel-udpgw@7200
+ss -ltn | grep -E ':(7200|7300)'
+```
 
 ## API akun
 
@@ -103,6 +124,7 @@ assets/
   xray-sync.py             pembangun config dari akun
   sshws.py                 jembatan SSH-over-WS (stdlib Python)
   api.py                   API akun untuk bot/panel (stdlib Python)
+  systemd/jnctunnel-udpgw@.service  template udpgw per port
   config.env               konfigurasi utama (/etc/jnctunnel/config.env)
   banner.txt               banner SSH
   systemd/                 unit & timer

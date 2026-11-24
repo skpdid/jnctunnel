@@ -1,0 +1,18 @@
+[Unit]
+Description=jnctunnel udpgw (badvpn) port %i
+Documentation=https://github.com/skpdid/jnctunnel
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/badvpn-udpgw --listen-addr 0.0.0.0:%i --max-clients 256 --max-connections-for-client 32 --client-socket-sndbuf 1048576 --loglevel none
+Restart=always
+RestartSec=2
+NoNewPrivileges=true
+LimitNOFILE=32768
+StandardOutput=null
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

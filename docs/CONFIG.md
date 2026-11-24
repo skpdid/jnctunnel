@@ -112,7 +112,27 @@ install (`openssl rand -hex 24`) dan disimpan di `/etc/jnctunnel/config.env`.
 Timer harian 03:30. Restore otomatis membuat arsip pengaman dulu, lalu memuat
 ulang layanan.
 
-## 9. Perintah harian
+## 9. udpgw (badvpn)
+
+`jnctunnel-udpgw@<port>.service` adalah unit template; dua instance aktif:
+`7200` dan `7300` (`UDPGW_PORTS` di `config.env`). ExecStart:
+
+```
+/usr/local/bin/badvpn-udpgw --listen-addr 0.0.0.0:<port> \
+  --max-clients 256 --max-connections-for-client 32 \
+  --client-socket-sndbuf 1048576 --loglevel none
+```
+
+- Listen di semua interface karena klien menyambung langsung ke port itu.
+  Batasi lewat firewall kalau hanya ingin dipakai dari jaringan tertentu.
+- Biner dicari di `/usr/bin`, `/usr/sbin`, `/usr/local/bin`; kalau tidak ada,
+  installer build dari `github.com/ambrop72/badvpn` dengan
+  `-DBUILD_NOTHING_BY_DEFAULT=1 -DBUILD_UDPGW=1 -DCMAKE_C_FLAGS=-fcommon`.
+- Tambah port lain: `systemctl enable --now jnctunnel-udpgw@7500`.
+- Tidak ada autentikasi di udpgw (memang begitu desain badvpn); siapa pun yang
+  bisa menjangkau port itu bisa memakainya sebagai gateway UDP.
+
+## 10. Perintah harian
 
 ```bash
 menu                                  # kelola akun
@@ -125,16 +145,17 @@ jnctunnel-apply remove vmess budi           # hapus user (restart)
 jnctunnel-backup backup                     # backup manual
 jnctunnel-backup list                       # daftar arsip
 jnctunnel-apiguard                          # pasang ulang rule pengaman
+systemctl status jnctunnel-udpgw@7200       # status udpgw
 /usr/local/sbin/jnctunnel-expire            # pembersihan manual
 ```
 
-## 10. Menambah protokol lain
+## 11. Menambah protokol lain
 
 1. Tambahkan inbound baru di `/etc/jnctunnel/xray.base.json` (listen 127.0.0.1).
 2. Tambahkan `location` yang sesuai di vhost nginx.
 3. Jalankan `python3 /usr/local/sbin/xray-sync.py && systemctl restart jnctunnel-xray`.
 
-## 11. Tidak ada panggilan keluar setelah terpasang
+## 12. Tidak ada panggilan keluar setelah terpasang
 
 - Tidak ada lisensi/lease/aktivasi, tidak ada kunci atau tanda tangan vendor.
 - Tidak ada heartbeat, callback instalasi, atau notifikasi ke pihak mana pun.
@@ -142,9 +163,10 @@ jnctunnel-apiguard                          # pasang ulang rule pengaman
   membaca `/etc/jnctunnel/accounts`.
 - IP server ditampilkan dari `ip -4 route get` (lokal, tanpa paket keluar).
 
-## 12. Yang sengaja tidak ada
+## 13. Yang sengaja tidak ada
 
 - Lisensi / lease / kill switch
 - Update paksa dari server luar (god mode)
 - Panel web, bot Telegram bawaan, SlowDNS, UDP Custom/ZIVPN, kuota/limit-IP
+  (udpgw badvpn sudah ada)
 - Lisensi, heartbeat, telemetri, update paksa dari luar

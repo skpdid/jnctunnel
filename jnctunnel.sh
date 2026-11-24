@@ -60,6 +60,60 @@ install_deps() {
   ok "paket dasar siap"
 }
 
+# --------------------------------------------------------------------- udpgw
+# badvpn-udpgw: gateway UDP untuk sesi SSH/SSHWS (VC, game, DNS).
+# Debian 12 tidak lagi menyediakan paket badvpn, jadi dicoba apt lalu build
+# dari source (butuh cmake + gcc + git saat install).
+install_udpgw() {
+  local bin="/usr/local/bin/badvpn-udpgw" p tmp
+  if [ -x "${bin}" ]; then
+    ok "udpgw sudah ada"
+    return 0
+  fi
+
+  DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends badvpn >/dev/null 2>&1 || true
+  for p in /usr/bin/badvpn-udpgw /usr/sbin/badvpn-udpgw /usr/local/bin/badvpn-udpgw; do
+    if [ -x "${p}" ]; then
+      install -m 755 "${p}" "${bin}"
+      ok "udpgw dari paket sistem"
+      return 0
+    fi
+  done
+
+  say "badvpn tidak ada di repo, build dari source (sekali saja)"
+  DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+    cmake build-essential git >/dev/null 2>&1 || true
+
+  tmp="$(mktemp -d)"
+  if git clone --depth 1 https://github.com/ambrop72/badvpn.git "${tmp}/src" >/dev/null 2>&1; then
+    mkdir -p "${tmp}/src/build"
+    if ( cd "${tmp}/src/build" \
+         && cmake .. -DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DBUILD_NOTHING_BY_DEFAULT=1 \
+              -DBUILD_UDPGW=1 -DCMAKE_C_FLAGS=-fcommon >/dev/null 2>&1 \
+         && make -j"$(nproc)" >/dev/null 2>&1 \
+         && install -m 755 udpgw/badvpn-udpgw "${bin}" ); then
+      ok "udpgw dibangun: $("${bin}" --version 2>&1 | head -1)"
+    fi
+  fi
+  rm -rf "${tmp}"
+
+  if [ -x "${bin}" ]; then
+    return 0
+  fi
+  warn "udpgw gagal disiapkan, port 7200/7300 dilewati"
+  return 1
+}
+
+setup_udpgw() {
+  local port
+  [ -x /usr/local/bin/badvpn-udpgw ] || { warn "udpgw tidak ada, unit tidak diaktifkan"; return 0; }
+  for port in ${UDPGW_PORTS:-7200 7300}; do
+    systemctl enable --now "jnctunnel-udpgw@${port}" >/dev/null 2>&1 \
+      || systemctl restart "jnctunnel-udpgw@${port}" >/dev/null 2>&1 || true
+  done
+  ok "udpgw aktif di port ${UDPGW_PORTS:-7200 7300}"
+}
+
 # ---------------------------------------------------------------------- Xray
 xray_asset() {
   case "$(uname -m)" in
@@ -139,6 +193,7 @@ write_configs() {
   install -m 644 "${ASSETS}/systemd/jnctunnel-apiguard.service" /etc/systemd/system/
   install -m 644 "${ASSETS}/systemd/jnctunnel-backup.service" /etc/systemd/system/
   install -m 644 "${ASSETS}/systemd/jnctunnel-backup.timer" /etc/systemd/system/
+  install -m 644 "${ASSETS}/systemd/jnctunnel-udpgw@.service" /etc/systemd/system/
 
   # nginx
   sed "s|@DOMAIN@|${DOMAIN}|g" "${ASSETS}/nginx-jnctunnel.conf" \
@@ -235,6 +290,7 @@ start_services() {
   systemctl enable --now jnctunnel-api >/dev/null 2>&1 || systemctl restart jnctunnel-api
   systemctl enable --now jnctunnel-expire.timer >/dev/null 2>&1 || true
   systemctl enable --now jnctunnel-backup.timer >/dev/null 2>&1 || true
+  setup_udpgw
   ok "semua layanan aktif"
 }
 
@@ -273,6 +329,7 @@ EOF
 
 # --------------------------------------------------------------------- main
 install_deps
+install_udpgw || true
 install_xray
 write_configs
 systemctl daemon-reload
