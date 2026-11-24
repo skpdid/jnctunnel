@@ -56,7 +56,7 @@ install_deps() {
   apt-get update -y >/dev/null 2>&1 || true
   apt-get install -y --no-install-recommends \
     curl unzip ca-certificates nginx haproxy dropbear-bin python3 openssl \
-    iproute2 procps >/dev/null
+    iproute2 procps iptables >/dev/null
   ok "paket dasar siap"
 }
 
