@@ -5,7 +5,8 @@ set -uo pipefail
 
 CONF="${JNCT_CONF:-/etc/jnctunnel/config.env}"
 ACC="${JNCT_ACC:-/etc/jnctunnel/accounts}"
-XRAY_SYNC="${JNCT_SYNC:-/usr/local/sbin/xray-sync.py}"
+APPLY="${JNCT_APPLY:-/usr/local/sbin/jnctunnel-apply}"
+BACKUP="${JNCT_BACKUP_BIN:-/usr/local/sbin/jnctunnel-backup}"
 
 # shellcheck disable=SC1090
 [ -f "${CONF}" ] && . "${CONF}"
@@ -39,12 +40,17 @@ epoch_to_date() {
   case "${1:-0}" in ""|0) echo "selamanya" ;; *) date -d "@$1" +%Y-%m-%d 2>/dev/null || echo "-" ;; esac
 }
 
-sync_xray() {
-  if python3 "${XRAY_SYNC}" >/dev/null 2>&1; then
-    systemctl restart jnctunnel-xray >/dev/null 2>&1 || true
+# Terapkan perubahan akun ke proses Xray yang sedang jalan.
+# mode: add | renew (hot-add, tanpa putus) atau remove | sync (restart).
+apply_change() {
+  local mode="$1" proto="${2:-}" name="${3:-}" out
+  if out="$(bash "${APPLY}" "${mode}" ${proto:+"${proto}"} ${name:+"${name}"} 2>&1)"; then
+    case "${out}" in
+      *"hot-add"*) printf "${C_OK}%s${C_OFF}\n" "${out}" ;;
+    esac
     return 0
   fi
-  err "gagal membangun config Xray (cek /usr/local/etc/xray/config.json)"
+  err "gagal menerapkan config Xray: ${out}"
   return 1
 }
 
@@ -116,7 +122,7 @@ add_xray() {
   mkdir -p "${ACC}/xray/${proto}"
   printf 'uuid=%s\nexp=%s\ncreated=%s\n' "${uuid}" "${exp}" "$(date +%s)" \
     > "${ACC}/xray/${proto}/${name}"
-  sync_xray || return
+  apply_change add "${proto}" "${name}" || return
   msg "akun ${proto} dibuat"
   printf "  nama    : %s\n  uuid    : %s\n  expired : %s\n" "${name}" "${uuid}" "$(epoch_to_date "${exp}")"
   echo
@@ -130,7 +136,7 @@ del_xray() {
   printf "Nama akun: "; read -r name || true
   [ -f "${ACC}/xray/${proto}/${name}" ] || { err "akun tidak ada"; return; }
   rm -f "${ACC}/xray/${proto}/${name}"
-  sync_xray && msg "akun ${proto}/${name} dihapus"
+  apply_change remove "${proto}" "${name}" && msg "akun ${proto}/${name} dihapus"
 }
 
 # ------------------------------------------------------------------ daftar
@@ -173,7 +179,7 @@ renew() {
     [ -f "${ACC}/xray/${proto}/${name}" ] || { err "akun tidak ada"; return; }
     days="$(ask_days)" || return
     sed -i "s/^exp=.*/exp=$(days_to_epoch "${days}")/" "${ACC}/xray/${proto}/${name}"
-    sync_xray && msg "akun ${proto}/${name} diperpanjang sampai $(epoch_to_date "$(days_to_epoch "${days}")")"
+    apply_change renew "${proto}" "${name}" && msg "akun ${proto}/${name} diperpanjang sampai $(epoch_to_date "$(days_to_epoch "${days}")")"
   else
     printf "Username: "; read -r name || true
     [ -f "${ACC}/ssh/${name}.exp" ] || { err "akun tidak ada"; return; }
@@ -232,16 +238,37 @@ online() {
 
 restart_all() {
   hr; echo "RESTART LAYANAN"; hr
-  for s in dropbear nginx haproxy jnctunnel-xray jnctunnel-sshws; do
+  for s in dropbear nginx haproxy jnctunnel-apiguard jnctunnel-xray jnctunnel-sshws jnctunnel-api; do
     if systemctl restart "${s}" 2>/dev/null; then msg "${s} ok"; else err "${s} gagal"; fi
   done
 }
 
 status_all() {
   hr; echo "STATUS LAYANAN"; hr
-  for s in dropbear nginx haproxy jnctunnel-xray jnctunnel-sshws jnctunnel-expire.timer; do
-    printf "  %-22s %s\n" "${s}" "$(systemctl is-active "${s}" 2>/dev/null || echo unknown)"
+  local st
+  for s in dropbear nginx haproxy jnctunnel-apiguard jnctunnel-xray jnctunnel-sshws \
+           jnctunnel-api jnctunnel-expire.timer jnctunnel-backup.timer; do
+    st="$(systemctl is-active "${s}" 2>/dev/null)"
+    printf "  %-22s %s\n" "${s}" "${st:-unknown}"
   done
+}
+
+backup_now() {
+  hr; echo "BACKUP KONFIGURASI"; hr
+  bash "${BACKUP}" backup || err "backup gagal"
+}
+
+backup_list() {
+  hr; echo "DAFTAR BACKUP"; hr
+  bash "${BACKUP}" list
+}
+
+show_token() {
+  hr; echo "TOKEN API"; hr
+  printf "  %s\n" "${API_AUTH_TOKEN:-(belum diset)}"
+  echo
+  echo "  Endpoint : http://127.0.0.1:${API_PORT:-8088}/vps/health"
+  echo "  Header   : Authorization: Bearer <token>"
 }
 
 # ------------------------------------------------------------------ main
@@ -260,6 +287,8 @@ BANNER
   printf "  %-28s %s\n" "3) Tambah akun Xray" "7) Link koneksi"
   printf "  %-28s %s\n" "4) Hapus akun Xray" "8) User SSH online"
   printf "  %-28s %s\n" "9) Restart layanan" "10) Status layanan"
+  printf "  %-28s %s\n" "11) Backup sekarang" "12) Daftar backup"
+  printf "  %-28s %s\n" "13) Token API" ""
   printf "  %-28s %s\n" "0) Keluar" ""
   hr
   printf "Pilihan: "
@@ -275,6 +304,9 @@ BANNER
     8) online; pause ;;
     9) restart_all; pause ;;
     10) status_all; pause ;;
+    11) backup_now; pause ;;
+    12) backup_list; pause ;;
+    13) show_token; pause ;;
     0|q|Q) break ;;
     *) ;;
   esac

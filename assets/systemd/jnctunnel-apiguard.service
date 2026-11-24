@@ -1,0 +1,12 @@
+[Unit]
+Description=jnctunnel guard port API Xray (10085)
+Before=jnctunnel-xray.service
+After=network-pre.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/jnctunnel-apiguard
+
+[Install]
+WantedBy=multi-user.target

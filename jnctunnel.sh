@@ -110,6 +110,10 @@ write_configs() {
     install -m 600 "${ASSETS}/config.env" "${CONF_DIR}/config.env"
   fi
   sed -i "s|^DOMAIN=.*|DOMAIN=\"${DOMAIN}\"|; s|^EMAIL=.*|EMAIL=\"${EMAIL}\"|" "${CONF_DIR}/config.env"
+  if ! grep -q '^API_AUTH_TOKEN="[^"]\+' "${CONF_DIR}/config.env"; then
+    token="$(openssl rand -hex 24)"
+    sed -i "s|^API_AUTH_TOKEN=.*|API_AUTH_TOKEN=\"${token}\"|" "${CONF_DIR}/config.env"
+  fi
   # muat port & default dari config.env
   # shellcheck disable=SC1090
   . "${CONF_DIR}/config.env"
@@ -119,6 +123,10 @@ write_configs() {
   install -m 755 "${ASSETS}/sshws.py" /usr/local/sbin/sshws.py
   install -m 755 "${ASSETS}/xray-sync.py" /usr/local/sbin/xray-sync.py
   install -m 755 "${REPO_DIR}/jnctunnel-expire" /usr/local/sbin/jnctunnel-expire
+  install -m 755 "${REPO_DIR}/jnctunnel-apply" /usr/local/sbin/jnctunnel-apply
+  install -m 755 "${REPO_DIR}/jnctunnel-apiguard" /usr/local/sbin/jnctunnel-apiguard
+  install -m 755 "${REPO_DIR}/jnctunnel-backup" /usr/local/sbin/jnctunnel-backup
+  install -m 755 "${ASSETS}/api.py" /usr/local/sbin/jnctunnel-api.py
   install -m 755 "${REPO_DIR}/menu.sh" /usr/local/sbin/menu-jnctunnel
   ln -sf /usr/local/sbin/menu-jnctunnel /usr/local/sbin/menu
 
@@ -127,6 +135,10 @@ write_configs() {
   install -m 644 "${ASSETS}/systemd/jnctunnel-sshws.service" /etc/systemd/system/
   install -m 644 "${ASSETS}/systemd/jnctunnel-expire.service" /etc/systemd/system/
   install -m 644 "${ASSETS}/systemd/jnctunnel-expire.timer" /etc/systemd/system/
+  install -m 644 "${ASSETS}/systemd/jnctunnel-api.service" /etc/systemd/system/
+  install -m 644 "${ASSETS}/systemd/jnctunnel-apiguard.service" /etc/systemd/system/
+  install -m 644 "${ASSETS}/systemd/jnctunnel-backup.service" /etc/systemd/system/
+  install -m 644 "${ASSETS}/systemd/jnctunnel-backup.timer" /etc/systemd/system/
 
   # nginx
   sed "s|@DOMAIN@|${DOMAIN}|g" "${ASSETS}/nginx-jnctunnel.conf" \
@@ -213,12 +225,16 @@ start_services() {
   nginx -t >/dev/null 2>&1 || die "konfigurasi nginx tidak valid"
 
   systemctl daemon-reload
+  # guard port API Xray harus aktif sebelum xray naik
+  systemctl enable --now jnctunnel-apiguard >/dev/null 2>&1 || /usr/local/sbin/jnctunnel-apiguard || true
   systemctl enable --now dropbear >/dev/null 2>&1 || systemctl restart dropbear
   systemctl enable --now nginx >/dev/null 2>&1 || systemctl restart nginx
   systemctl enable --now haproxy >/dev/null 2>&1 || systemctl restart haproxy
   systemctl enable --now jnctunnel-xray >/dev/null 2>&1 || systemctl restart jnctunnel-xray
   systemctl enable --now jnctunnel-sshws >/dev/null 2>&1 || systemctl restart jnctunnel-sshws
+  systemctl enable --now jnctunnel-api >/dev/null 2>&1 || systemctl restart jnctunnel-api
   systemctl enable --now jnctunnel-expire.timer >/dev/null 2>&1 || true
+  systemctl enable --now jnctunnel-backup.timer >/dev/null 2>&1 || true
   ok "semua layanan aktif"
 }
 
@@ -247,6 +263,7 @@ $(printf "${C_OK}")jnctunnel terpasang$(printf "${C_OFF}")
   HTTPUpgrade   : /upvmess /upvless /uptrojan
   gRPC          : /vmess-grpc /vless-grpc /trojan-grpc
   XHTTP         : /xhvless
+  API akun      : http://127.0.0.1:${API_PORT:-8088}/vps/health (token di ${CONF_DIR}/config.env)
   Menu          : ketik "menu" atau "menu-jnctunnel"
 
   Tambah akun: menu > 1 (SSH) atau 3 (Xray)

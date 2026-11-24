@@ -1,0 +1,134 @@
+#!/usr/bin/env bash
+# jnctunnel-apply - terapkan perubahan akun Xray ke proses yang sedang jalan.
+#
+#   jnctunnel-apply add    <proto> <nama>   tambah user (hot-add, tanpa restart)
+#   jnctunnel-apply renew  <proto> <nama>   perpanjang (hot-add bila perlu)
+#   jnctunnel-apply remove <proto> <nama>   hapus user (restart, putus sesi lama)
+#   jnctunnel-apply sync                    bangun ulang config penuh (restart)
+#
+# Xray tidak punya reload config. User baru bisa masuk lewat HandlerService
+# (xray api adu) tanpa memutus pengguna lain; penghapusan tetap butuh restart
+# supaya sesi user yang dicabut benar-benar mati.
+set -uo pipefail
+
+CONF="${JNCT_CONF:-/etc/jnctunnel/config.env}"
+CFG="${JNCT_TARGET:-/usr/local/etc/xray/config.json}"
+SYNC="${JNCT_SYNC:-/usr/local/sbin/xray-sync.py}"
+XRAY="${JNCT_XRAY:-/usr/local/bin/xray}"
+API_ADDR="${JNCT_API_ADDR:-127.0.0.1:10085}"
+ACC="${JNCT_ACC:-/etc/jnctunnel/accounts}"
+
+# shellcheck disable=SC1090
+[ -f "${CONF}" ] && . "${CONF}"
+XRAY_API="${XRAY_API:-1}"
+
+log() { logger -t jnctunnel "$*" 2>/dev/null || true; echo "$*"; }
+
+tags_for() {
+  case "$1" in
+    vmess)  echo "vmess-ws vmess-up vmess-grpc" ;;
+    vless)  echo "vless-ws vless-up vless-grpc vless-xhttp" ;;
+    trojan) echo "trojan-ws trojan-up trojan-grpc" ;;
+    *)      echo "" ;;
+  esac
+}
+
+cfg_hash() { sha256sum "${CFG}" 2>/dev/null | cut -d' ' -f1; }
+
+# HandlerService hanya dipakai kalau port API tertutup untuk non-root dan
+# Xray tidak jalan sebagai root (kalau tidak, user tunnel bisa menyentuh API).
+api_ready() {
+  [ "${JNCT_API_FORCE:-0}" = "1" ] && return 0
+  [ "${XRAY_API}" = "1" ] || return 1
+  command -v iptables >/dev/null 2>&1 || return 1
+  iptables -w 5 -C OUTPUT -o lo -p tcp -d 127.0.0.1 --dport 10085 \
+    -m owner ! --uid-owner 0 -j REJECT --reject-with tcp-reset >/dev/null 2>&1 || return 1
+  local u
+  u="$(systemctl show jnctunnel-xray -p User --value 2>/dev/null)"
+  [ "${u}" = "nobody" ] || return 1
+  return 0
+}
+
+hot_add() { # <proto> <nama> <uuid>
+  local proto="$1" name="$2" uuid="$3" tmp out added expected tags
+  tags="$(tags_for "${proto}")"
+  [ -n "${tags}" ] || return 1
+  expected="$(printf '%s\n' ${tags} | wc -l)"
+  tmp="$(mktemp "$(dirname "${CFG}")/.adu.XXXXXX.json")" || return 1
+  if ! python3 - "${proto}" "${name}" "${uuid}" "${tmp}" ${tags} <<'PY'
+import json, sys
+proto, name, uuid, path = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
+tags = sys.argv[5:]
+ports = {
+    "vmess-ws": 10001, "vmess-up": 10004, "vmess-grpc": 11001,
+    "vless-ws": 10002, "vless-up": 10005, "vless-grpc": 11002, "vless-xhttp": 12002,
+    "trojan-ws": 10003, "trojan-up": 10006, "trojan-grpc": 11003,
+}
+if proto == "vmess":
+    client = {"id": uuid, "email": name, "alterId": 0}
+elif proto == "vless":
+    client = {"id": uuid, "email": name, "flow": ""}
+else:
+    client = {"password": uuid, "email": name}
+payload = {"inbounds": [
+    {"tag": t, "listen": "127.0.0.1", "port": ports[t], "protocol": proto,
+     "settings": {"clients": [client]}}
+    for t in tags
+]}
+with open(path, "w", encoding="utf-8") as fh:
+    json.dump(payload, fh)
+PY
+  then
+    rm -f "${tmp}"
+    return 1
+  fi
+
+  out="$("${XRAY}" api adu --server="${API_ADDR}" "${tmp}" 2>&1)"
+  rm -f "${tmp}"
+  added="$(printf '%s' "${out}" | sed -n 's/.*Added \([0-9][0-9]*\) user(s) in total.*/\1/p' | tail -1)"
+  if [ "${added}" = "${expected}" ]; then
+    log "hot-add ${proto}/${name}: ${added} inbound tanpa restart"
+    return 0
+  fi
+  log "hot-add ${proto}/${name} gagal (${added:-0}/${expected}), fallback restart"
+  return 1
+}
+
+restart_xray() {
+  if systemctl restart jnctunnel-xray; then
+    log "xray direstart"
+  else
+    log "GAGAL restart xray"
+    return 1
+  fi
+}
+
+main() {
+  local mode="${1:-}" proto="${2:-}" name="${3:-}" before after uuid
+  case "${mode}" in
+    add|renew|remove|sync) ;;
+    *) echo "pemakaian: jnctunnel-apply {add|renew|remove|sync} [proto] [nama]" >&2; return 2 ;;
+  esac
+
+  before="$(cfg_hash)"
+  python3 "${SYNC}" >/dev/null || { log "xray-sync gagal"; return 1; }
+  after="$(cfg_hash)"
+
+  if [ "${before}" = "${after}" ]; then
+    log "config tidak berubah, layanan tidak disentuh"
+    return 0
+  fi
+
+  case "${mode}" in
+    add|renew)
+      uuid="$(awk -F= '$1=="uuid"{print $2}' "${ACC}/xray/${proto}/${name}" 2>/dev/null)"
+      if [ -n "${uuid}" ] && api_ready && hot_add "${proto}" "${name}" "${uuid}"; then
+        return 0
+      fi
+      restart_xray ;;
+    remove|sync)
+      restart_xray ;;
+  esac
+}
+
+main "$@"

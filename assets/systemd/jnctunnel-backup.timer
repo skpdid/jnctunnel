@@ -1,0 +1,11 @@
+[Unit]
+Description=jnctunnel backup harian
+
+[Timer]
+OnCalendar=*-*-* 03:30:00
+RandomizedDelaySec=10min
+Persistent=true
+Unit=jnctunnel-backup.service
+
+[Install]
+WantedBy=timers.target

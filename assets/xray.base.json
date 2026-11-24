@@ -4,14 +4,27 @@
   },
   "inbounds": [
     {
+      "tag": "api",
+      "listen": "127.0.0.1",
+      "port": 10085,
+      "protocol": "dokodemo-door",
+      "settings": {
+        "address": "127.0.0.1"
+      }
+    },
+    {
       "tag": "vmess-ws",
       "listen": "127.0.0.1",
       "port": 10001,
       "protocol": "vmess",
-      "settings": { "clients": [] },
+      "settings": {
+        "clients": []
+      },
       "streamSettings": {
         "network": "ws",
-        "wsSettings": { "path": "/vmess" }
+        "wsSettings": {
+          "path": "/vmess"
+        }
       }
     },
     {
@@ -19,10 +32,15 @@
       "listen": "127.0.0.1",
       "port": 10002,
       "protocol": "vless",
-      "settings": { "clients": [], "decryption": "none" },
+      "settings": {
+        "clients": [],
+        "decryption": "none"
+      },
       "streamSettings": {
         "network": "ws",
-        "wsSettings": { "path": "/vless" }
+        "wsSettings": {
+          "path": "/vless"
+        }
       }
     },
     {
@@ -30,10 +48,14 @@
       "listen": "127.0.0.1",
       "port": 10003,
       "protocol": "trojan",
-      "settings": { "clients": [] },
+      "settings": {
+        "clients": []
+      },
       "streamSettings": {
         "network": "ws",
-        "wsSettings": { "path": "/trojan" }
+        "wsSettings": {
+          "path": "/trojan"
+        }
       }
     },
     {
@@ -41,10 +63,15 @@
       "listen": "127.0.0.1",
       "port": 10004,
       "protocol": "vmess",
-      "settings": { "clients": [] },
+      "settings": {
+        "clients": []
+      },
       "streamSettings": {
         "network": "httpupgrade",
-        "httpupgradeSettings": { "path": "/upvmess", "host": "@DOMAIN@" }
+        "httpupgradeSettings": {
+          "path": "/upvmess",
+          "host": "@DOMAIN@"
+        }
       }
     },
     {
@@ -52,10 +79,16 @@
       "listen": "127.0.0.1",
       "port": 10005,
       "protocol": "vless",
-      "settings": { "clients": [], "decryption": "none" },
+      "settings": {
+        "clients": [],
+        "decryption": "none"
+      },
       "streamSettings": {
         "network": "httpupgrade",
-        "httpupgradeSettings": { "path": "/upvless", "host": "@DOMAIN@" }
+        "httpupgradeSettings": {
+          "path": "/upvless",
+          "host": "@DOMAIN@"
+        }
       }
     },
     {
@@ -63,10 +96,15 @@
       "listen": "127.0.0.1",
       "port": 10006,
       "protocol": "trojan",
-      "settings": { "clients": [] },
+      "settings": {
+        "clients": []
+      },
       "streamSettings": {
         "network": "httpupgrade",
-        "httpupgradeSettings": { "path": "/uptrojan", "host": "@DOMAIN@" }
+        "httpupgradeSettings": {
+          "path": "/uptrojan",
+          "host": "@DOMAIN@"
+        }
       }
     },
     {
@@ -74,10 +112,14 @@
       "listen": "127.0.0.1",
       "port": 11001,
       "protocol": "vmess",
-      "settings": { "clients": [] },
+      "settings": {
+        "clients": []
+      },
       "streamSettings": {
         "network": "grpc",
-        "grpcSettings": { "serviceName": "vmess-grpc" }
+        "grpcSettings": {
+          "serviceName": "vmess-grpc"
+        }
       }
     },
     {
@@ -85,10 +127,15 @@
       "listen": "127.0.0.1",
       "port": 11002,
       "protocol": "vless",
-      "settings": { "clients": [], "decryption": "none" },
+      "settings": {
+        "clients": [],
+        "decryption": "none"
+      },
       "streamSettings": {
         "network": "grpc",
-        "grpcSettings": { "serviceName": "vless-grpc" }
+        "grpcSettings": {
+          "serviceName": "vless-grpc"
+        }
       }
     },
     {
@@ -96,10 +143,14 @@
       "listen": "127.0.0.1",
       "port": 11003,
       "protocol": "trojan",
-      "settings": { "clients": [] },
+      "settings": {
+        "clients": []
+      },
       "streamSettings": {
         "network": "grpc",
-        "grpcSettings": { "serviceName": "trojan-grpc" }
+        "grpcSettings": {
+          "serviceName": "trojan-grpc"
+        }
       }
     },
     {
@@ -107,20 +158,53 @@
       "listen": "127.0.0.1",
       "port": 12002,
       "protocol": "vless",
-      "settings": { "clients": [], "decryption": "none" },
+      "settings": {
+        "clients": [],
+        "decryption": "none"
+      },
       "streamSettings": {
         "network": "xhttp",
-        "xhttpSettings": { "path": "/xhvless", "host": "@DOMAIN@", "mode": "auto" }
+        "xhttpSettings": {
+          "path": "/xhvless",
+          "host": "@DOMAIN@",
+          "mode": "auto"
+        }
       }
     }
   ],
   "outbounds": [
-    { "protocol": "freedom", "tag": "direct" },
-    { "protocol": "blackhole", "tag": "blocked" }
+    {
+      "protocol": "freedom",
+      "tag": "direct"
+    },
+    {
+      "protocol": "blackhole",
+      "tag": "blocked"
+    }
   ],
   "routing": {
     "rules": [
-      { "type": "field", "ip": ["geoip:private"], "outboundTag": "blocked" }
+      {
+        "type": "field",
+        "inboundTag": [
+          "api"
+        ],
+        "outboundTag": "api"
+      },
+      {
+        "type": "field",
+        "ip": [
+          "geoip:private"
+        ],
+        "outboundTag": "blocked"
+      }
+    ]
+  },
+  "api": {
+    "tag": "api",
+    "services": [
+      "HandlerService",
+      "StatsService"
     ]
   }
 }

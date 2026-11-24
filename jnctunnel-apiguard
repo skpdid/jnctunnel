@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# jnctunnel-apiguard - tutup port API Xray (127.0.0.1:10085) untuk proses non-root.
+#
+# Xray berjalan sebagai user `nobody` dan punya outbound `freedom`. Tanpa rule
+# ini, user tunnel bisa menjangkau API HandlerService dari dalam sesi dan
+# menambah user sendiri. Rule dipasang sebelum jnctunnel-xray start.
+set -uo pipefail
+
+RULE=(-o lo -p tcp -d 127.0.0.1 --dport 10085 -m owner ! --uid-owner 0 -j REJECT --reject-with tcp-reset)
+
+command -v iptables >/dev/null 2>&1 || { echo "iptables tidak ada"; exit 0; }
+
+if iptables -w 5 -C OUTPUT "${RULE[@]}" >/dev/null 2>&1; then
+  echo "rule sudah ada"
+  exit 0
+fi
+
+if iptables -w 5 -I OUTPUT 1 "${RULE[@]}"; then
+  echo "rule dipasang"
+  logger -t jnctunnel "apiguard: port 10085 ditutup untuk non-root"
+  exit 0
+fi
+
+echo "gagal memasang rule" >&2
+exit 1

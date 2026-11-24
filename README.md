@@ -16,7 +16,12 @@ berat — semua kode bisa dibaca dalam beberapa menit.
 - **TLS** di haproxy (Let's Encrypt bila domain + email diisi, kalau tidak
   sertifikat sendiri), nginx sebagai backend HTTP
 - **Menu CLI** untuk tambah/hapus/perpanjang akun, daftar akun, link koneksi,
-  cek user online, restart & status layanan
+  cek user online, backup, token API, restart & status layanan
+- **Hot-add user Xray** lewat HandlerService (`xray api adu`): akun baru masuk
+  tanpa memutus pengguna lain; hapus akun tetap restart agar sesi lama mati
+- **API akun** (JSON, token Bearer) untuk bot/panel di `127.0.0.1:8088`,
+  diakses lewat nginx `/vps/`
+- **Backup harian** otomatis (03:30) + `jnctunnel-backup restore`
 - **Kedaluwarsa otomatis** lewat systemd timer 5 menit
 - **Uninstaller** yang mengembalikan konfigurasi nginx/haproxy
 
@@ -48,8 +53,37 @@ Setelah selesai, jalankan `menu`.
 | 10004-10006 | Xray | HTTPUpgrade |
 | 11001-11003 | Xray | gRPC |
 | 12002 | Xray | XHTTP |
+| 8088 | jnctunnel-api | API akun (lokal, token Bearer) |
+| 10085 | Xray API | HandlerService untuk hot-add (dijaga iptables) |
 
 Semua port 2082/8083/8081/10001-12002 hanya listen di `127.0.0.1`.
+
+## API akun
+
+Semua endpoint (kecuali health) butuh `Authorization: Bearer <API_AUTH_TOKEN>`
+(token dibuat otomatis saat install, ada di `/etc/jnctunnel/config.env`).
+
+| Method | Path | Fungsi |
+|---|---|---|
+| GET | `/vps/health` | cek hidup (tanpa token) |
+| GET | `/vps/accounts` | daftar semua akun |
+| POST | `/vps/sshvpn` | buat akun SSH `{username,password,expired}` |
+| POST | `/vps/trialsshvpn` | akun SSH 1 hari |
+| DELETE | `/vps/deletesshvpn/<user>` | hapus akun SSH |
+| POST | `/vps/renewsshvpn/<user>/<hari>` | perpanjang SSH |
+| POST | `/vps/{vmess,vless,trojan}all` | buat akun Xray + link |
+| POST | `/vps/trial{vmess,vless,trojan}all` | akun Xray 1 hari |
+| DELETE | `/vps/delete{vmess,vless,trojan}/<user>` | hapus akun Xray |
+| POST | `/vps/renew{vmess,vless,trojan}/<user>/<hari>` | perpanjang Xray |
+| GET | `/vps/capacity` | load, RAM, disk |
+
+Contoh:
+
+```bash
+curl -sS -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8088/vps/accounts
+curl -sS -X POST -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"username":"budi","expired":30}' http://127.0.0.1:8088/vps/vmessall
+```
 
 ## Struktur repo
 
@@ -58,6 +92,9 @@ install.sh                 pemasang satu langkah (unduh repo lalu jalankan)
 jnctunnel.sh               installer utama
 menu.sh                    menu CLI
 jnctunnel-expire           pembersih akun kedaluwarsa (timer)
+jnctunnel-apply            terapkan perubahan akun (hot-add / restart)
+jnctunnel-apiguard         tutup port API Xray untuk non-root
+jnctunnel-backup           backup & restore konfigurasi
 uninstall.sh               pelepas layanan
 assets/
   nginx-jnctunnel.conf     vhost nginx
@@ -65,6 +102,7 @@ assets/
   xray.base.json           template inbound Xray
   xray-sync.py             pembangun config dari akun
   sshws.py                 jembatan SSH-over-WS (stdlib Python)
+  api.py                   API akun untuk bot/panel (stdlib Python)
   config.env               konfigurasi utama (/etc/jnctunnel/config.env)
   banner.txt               banner SSH
   systemd/                 unit & timer
@@ -94,7 +132,7 @@ Satu-satunya koneksi keluar:
 | Saat install | `api.github.com` + `github.com` | unduh rilis Xray-core |
 | Saat install | `codeload.github.com` | unduh repo ini (jalur `install.sh`) |
 | Opsional | Let's Encrypt | hanya bila `--domain` dan `--email` diisi |
-| Saat pakai | tidak ada | IP server dibaca lokal lewat `ip route`, bukan layanan luar |
+| Saat pakai | tidak ada | IP server dibaca lokal lewat `ip route`; API akun hanya 127.0.0.1 |
 
 Setelah terpasang, tidak ada unit/timer yang memanggil internet: satu-satunya
 timer adalah `jnctunnel-expire` yang hanya membaca file akun di disk.

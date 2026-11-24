@@ -1,0 +1,6 @@
+[Unit]
+Description=jnctunnel backup konfigurasi
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/jnctunnel-backup backup

@@ -1,0 +1,18 @@
+[Unit]
+Description=jnctunnel API (akun SSH/Xray)
+After=network-online.target jnctunnel-xray.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /usr/local/sbin/jnctunnel-api.py
+Restart=always
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+LimitNOFILE=8192
+StandardOutput=null
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

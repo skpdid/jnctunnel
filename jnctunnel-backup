@@ -1,0 +1,64 @@
+#!/usr/bin/env bash
+# jnctunnel-backup - cadangkan konfigurasi & akun.
+#
+#   jnctunnel-backup backup     buat arsip baru (dipanggil timer harian)
+#   jnctunnel-backup list       daftar arsip
+#   jnctunnel-backup restore F  pulihkan dari arsip F
+#
+# Yang dicadangkan: /etc/jnctunnel (akun + config + sertifikat),
+# /usr/local/etc/xray/config.json, vhost nginx, dan haproxy.cfg.
+set -uo pipefail
+
+DIR="${JNCT_BACKUP_DIR:-/var/backups/jnctunnel}"
+KEEP="${JNCT_BACKUP_KEEP:-7}"
+STAMP="$(date +%Y%m%d-%H%M%S)"
+
+say() { echo "[jnctunnel-backup] $*"; }
+
+do_backup() {
+  mkdir -p "${DIR}" || exit 1
+  local out="${DIR}/jnctunnel-${STAMP}.tar.gz"
+  tar -czf "${out}" \
+    -C / etc/jnctunnel \
+    usr/local/etc/xray/config.json \
+    etc/nginx/sites-available/jnctunnel.conf \
+    etc/haproxy/haproxy.cfg 2>/dev/null
+  if [ $? -ne 0 ] || [ ! -s "${out}" ]; then
+    say "gagal membuat arsip"
+    rm -f "${out}"
+    exit 1
+  fi
+  chmod 600 "${out}"
+  # simpan hanya N arsip terbaru
+  ls -1t "${DIR}"/jnctunnel-*.tar.gz 2>/dev/null | tail -n +$((KEEP + 1)) | xargs -r rm -f
+  say "arsip dibuat: ${out} ($(du -h "${out}" | cut -f1))"
+}
+
+do_list() {
+  ls -1sh "${DIR}"/jnctunnel-*.tar.gz 2>/dev/null || say "belum ada arsip di ${DIR}"
+}
+
+do_restore() {
+  local file="${1:-}"
+  [ -n "${file}" ] || { echo "pemakaian: jnctunnel-backup restore <arsip>" >&2; exit 2; }
+  [ -f "${file}" ] || { echo "arsip tidak ditemukan: ${file}" >&2; exit 2; }
+  tar -tzf "${file}" >/dev/null 2>&1 || { echo "arsip rusak" >&2; exit 2; }
+
+  # salinan pengaman sebelum menimpa
+  do_backup >/dev/null 2>&1 || true
+  tar -xzf "${file}" -C / || { echo "gagal mengekstrak" >&2; exit 1; }
+  say "dipulihkan dari ${file}"
+
+  python3 /usr/local/sbin/xray-sync.py >/dev/null 2>&1 || true
+  systemctl restart jnctunnel-xray jnctunnel-sshws 2>/dev/null || true
+  systemctl reload nginx 2>/dev/null || true
+  systemctl restart haproxy 2>/dev/null || true
+  say "layanan dimuat ulang"
+}
+
+case "${1:-backup}" in
+  backup)  do_backup ;;
+  list)    do_list ;;
+  restore) shift; do_restore "$@" ;;
+  *) echo "pemakaian: jnctunnel-backup {backup|list|restore <arsip>}" >&2; exit 2 ;;
+esac

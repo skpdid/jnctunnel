@@ -69,24 +69,72 @@ Perpanjangan Let's Encrypt mengikuti timer certbot bawaan; setelah renew,
 jalankan `systemctl restart haproxy` (atau tambahkan hook deploy yang menyalin
 PEM lalu restart).
 
-## 6. Perintah harian
+## 6. Hot-add user (tanpa memutus pengguna lain)
+
+Xray tidak punya reload config, jadi perubahan daftar user biasanya berarti
+restart dan semua sesi VMess/VLESS/Trojan putus. `jnctunnel-apply` menghindari
+itu untuk penambahan:
+
+1. Tulis file akun, lalu `xray-sync.py` membangun ulang `config.json`.
+2. Bandingkan hash config sebelum/sesudah. **Sama → layanan tidak disentuh.**
+3. Bila berubah dan mode `add`/`renew`: panggil
+   `xray api adu --server=127.0.0.1:10085` untuk user itu saja.
+4. Hitung balasan `Added N user(s) in total`. Harus sama dengan jumlah inbound
+   protokol itu (VMess 3, VLESS 4, Trojan 3). Kalau tidak → fallback restart.
+5. Mode `remove` selalu restart, supaya sesi user yang dicabut benar-benar mati.
+
+Pengaman: `HandlerService` hanya dipakai kalau rule iptables
+
+```
+OUTPUT -o lo -p tcp -d 127.0.0.1 --dport 10085 -m owner ! --uid-owner 0 \
+  -j REJECT --reject-with tcp-reset
+```
+
+terpasang **dan** Xray berjalan sebagai `nobody`. Tanpa itu, `jnctunnel-apply`
+langsung restart (perilaku aman).
+
+## 7. API akun
+
+`jnctunnel-api.py` (Python stdlib) listen di `127.0.0.1:8088`, dipublikasikan
+nginx lewat `location /vps/`. Token `API_AUTH_TOKEN` dibuat otomatis saat
+install (`openssl rand -hex 24`) dan disimpan di `/etc/jnctunnel/config.env`.
+
+- `/vps/health` tanpa token; sisanya wajib `Authorization: Bearer <token>`
+  atau `X-API-Key`.
+- Username divalidasi `^[a-z0-9][a-z0-9_-]{1,19}$`.
+- Masa aktif dibatasi 1-3650 hari.
+- Aksi tulis memanggil `jnctunnel-apply`, jadi aturan hot-add di atas berlaku.
+
+## 8. Backup
+
+`jnctunnel-backup` mencadangkan `/etc/jnctunnel`, config Xray, vhost nginx, dan
+`haproxy.cfg` ke `/var/backups/jnctunnel` (mode 600, simpan 7 arsip terakhir).
+Timer harian 03:30. Restore otomatis membuat arsip pengaman dulu, lalu memuat
+ulang layanan.
+
+## 9. Perintah harian
 
 ```bash
 menu                                  # kelola akun
 systemctl status jnctunnel-xray jnctunnel-sshws haproxy nginx dropbear
 journalctl -u jnctunnel-xray -n 50    # log Xray
 journalctl -u jnctunnel-sshws -n 50   # log jembatan SSH
-python3 /usr/local/sbin/xray-sync.py  # bangun ulang config Xray
-/usr/local/sbin/jnctunnel-expire      # jalankan pembersihan manual
+python3 /usr/local/sbin/xray-sync.py        # bangun ulang config Xray
+jnctunnel-apply add vmess budi              # tambah user tanpa restart
+jnctunnel-apply remove vmess budi           # hapus user (restart)
+jnctunnel-backup backup                     # backup manual
+jnctunnel-backup list                       # daftar arsip
+jnctunnel-apiguard                          # pasang ulang rule pengaman
+/usr/local/sbin/jnctunnel-expire            # pembersihan manual
 ```
 
-## 7. Menambah protokol lain
+## 10. Menambah protokol lain
 
 1. Tambahkan inbound baru di `/etc/jnctunnel/xray.base.json` (listen 127.0.0.1).
 2. Tambahkan `location` yang sesuai di vhost nginx.
 3. Jalankan `python3 /usr/local/sbin/xray-sync.py && systemctl restart jnctunnel-xray`.
 
-## 8. Tidak ada panggilan keluar setelah terpasang
+## 11. Tidak ada panggilan keluar setelah terpasang
 
 - Tidak ada lisensi/lease/aktivasi, tidak ada kunci atau tanda tangan vendor.
 - Tidak ada heartbeat, callback instalasi, atau notifikasi ke pihak mana pun.
@@ -94,9 +142,9 @@ python3 /usr/local/sbin/xray-sync.py  # bangun ulang config Xray
   membaca `/etc/jnctunnel/accounts`.
 - IP server ditampilkan dari `ip -4 route get` (lokal, tanpa paket keluar).
 
-## 9. Yang sengaja tidak ada
+## 12. Yang sengaja tidak ada
 
 - Lisensi / lease / kill switch
 - Update paksa dari server luar (god mode)
-- API HTTP untuk bot, panel web, backup otomatis, SlowDNS, UDP Custom/ZIVPN
-- Telemetri apa pun
+- Panel web, bot Telegram bawaan, SlowDNS, UDP Custom/ZIVPN, kuota/limit-IP
+- Lisensi, heartbeat, telemetri, update paksa dari luar
