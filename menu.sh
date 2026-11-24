@@ -22,10 +22,16 @@ msg()  { printf "${C_OK}%s${C_OFF}\n" "$*"; }
 warn() { printf "${C_WARN}%s${C_OFF}\n" "$*"; }
 err()  { printf "${C_ERR}%s${C_OFF}\n" "$*"; }
 
+# IP lokal VPS tanpa panggilan ke luar (ip route tidak mengirim paket).
+local_ipv4() {
+  local ip
+  ip="$(ip -4 route get 1.1.1.1 2>/dev/null | sed -n 's/.* src \([0-9.]*\).*/\1/p' | head -1)"
+  [ -n "${ip}" ] || ip="$(hostname -I 2>/dev/null | awk '{print $1}')"
+  printf '%s' "${ip}"
+}
+
 server_host() {
-  if [ -n "${DOMAIN}" ]; then echo "${DOMAIN}"; else
-    curl -4fsS --max-time 5 https://api.ipify.org 2>/dev/null || hostname -I | awk '{print $1}'
-  fi
+  if [ -n "${DOMAIN}" ]; then echo "${DOMAIN}"; else local_ipv4; fi
 }
 
 days_to_epoch() { date -d "+$1 days" +%s 2>/dev/null || echo 0; }

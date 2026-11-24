@@ -86,7 +86,15 @@ python3 /usr/local/sbin/xray-sync.py  # bangun ulang config Xray
 2. Tambahkan `location` yang sesuai di vhost nginx.
 3. Jalankan `python3 /usr/local/sbin/xray-sync.py && systemctl restart jnctunnel-xray`.
 
-## 8. Yang sengaja tidak ada
+## 8. Tidak ada panggilan keluar setelah terpasang
+
+- Tidak ada lisensi/lease/aktivasi, tidak ada kunci atau tanda tangan vendor.
+- Tidak ada heartbeat, callback instalasi, atau notifikasi ke pihak mana pun.
+- Tidak ada unit/timer yang menghubungi internet; `jnctunnel-expire` hanya
+  membaca `/etc/jnctunnel/accounts`.
+- IP server ditampilkan dari `ip -4 route get` (lokal, tanpa paket keluar).
+
+## 9. Yang sengaja tidak ada
 
 - Lisensi / lease / kill switch
 - Update paksa dari server luar (god mode)

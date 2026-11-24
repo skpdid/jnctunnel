@@ -222,9 +222,17 @@ start_services() {
   ok "semua layanan aktif"
 }
 
+# Deteksi IP lokal VPS tanpa memanggil layanan luar (tidak ada paket keluar).
+detect_public_ipv4() {
+  local ip
+  ip="$(ip -4 route get 1.1.1.1 2>/dev/null | sed -n 's/.* src \([0-9.]*\).*/\1/p' | head -1)"
+  [ -n "${ip}" ] || ip="$(hostname -I 2>/dev/null | awk '{print $1}')"
+  printf '%s' "${ip}"
+}
+
 summary() {
   local ip
-  ip="$(curl -4fsS --max-time 8 https://api.ipify.org 2>/dev/null || hostname -I | awk '{print $1}')"
+  ip="$(detect_public_ipv4)"
   cat <<EOF
 
 $(printf "${C_OK}")jnctunnel terpasang$(printf "${C_OFF}")

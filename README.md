@@ -83,6 +83,22 @@ client :443 ─ haproxy (TLS)
 client :109 / :143 ─ dropbear
 ```
 
+## Jaringan yang dihubungi
+
+Tidak ada lisensi, aktivasi, heartbeat, callback instalasi, atau telemetri.
+Satu-satunya koneksi keluar:
+
+| Kapan | Tujuan | Untuk apa |
+|---|---|---|
+| Saat install | repo apt Debian/Ubuntu | paket nginx, haproxy, dropbear, python3 |
+| Saat install | `api.github.com` + `github.com` | unduh rilis Xray-core |
+| Saat install | `codeload.github.com` | unduh repo ini (jalur `install.sh`) |
+| Opsional | Let's Encrypt | hanya bila `--domain` dan `--email` diisi |
+| Saat pakai | tidak ada | IP server dibaca lokal lewat `ip route`, bukan layanan luar |
+
+Setelah terpasang, tidak ada unit/timer yang memanggil internet: satu-satunya
+timer adalah `jnctunnel-expire` yang hanya membaca file akun di disk.
+
 ## Keamanan & batasan
 
 - Tidak ada lisensi, tidak ada heartbeat, tidak ada update paksa dari server luar.
