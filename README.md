@@ -91,6 +91,14 @@ client :109 / :143 ─ dropbear
 - Tidak mengatur firewall. Buka port 80, 443, 109, 143 di firewall/panel VPS.
 - Root login SSH tidak diubah — pastikan kredensial root kuat.
 
+## Pengujian
+
+```bash
+bash -n install.sh jnctunnel.sh menu.sh uninstall.sh jnctunnel-expire
+python3 tests/test_sshws.py        # raw SSH, PROXY v1, WS, CONNECT, HTTP ditolak
+python3 -c "import json;json.load(open('assets/xray.base.json'))"
+```
+
 ## Lisensi
 
 MIT.

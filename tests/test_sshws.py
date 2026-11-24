@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Uji fungsional sshws.py: raw SSH, PROXY v1, WebSocket, CONNECT."""
+"""Uji fungsional sshws.py: raw SSH, PROXY v1, WebSocket, CONNECT.
+
+Jalankan: python3 tests/test_sshws.py
+Semua koneksi hanya ke 127.0.0.1, tidak menyentuh layanan sistem.
+"""
 import base64
 import hashlib
 import os
@@ -12,6 +16,7 @@ import time
 LISTEN = ("127.0.0.1", 22082)
 TARGET = ("127.0.0.1", 22109)
 GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 def fake_ssh():
@@ -41,89 +46,109 @@ def fake_ssh():
     return srv
 
 
-def recv_until(sock, marker, limit=4096):
-    data = b""
-    while marker not in data and len(data) < limit:
+def read_until(sock, done, timeout=6):
+    """Baca terus sampai done(buffer) benar; kembalikan seluruh buffer.
+
+    Buffer utuh dikembalikan supaya data yang datang menyatu (banner + echo
+    dalam satu segmen TCP) tidak hilang.
+    """
+    sock.settimeout(timeout)
+    buf = b""
+    while not done(buf):
         chunk = sock.recv(1024)
         if not chunk:
             break
-        data += chunk
-    return data
+        buf += chunk
+    return buf
 
 
 def case_raw():
-    s = socket.create_connection(LISTEN, timeout=5)
-    banner = recv_until(s, b"\r\n")
-    assert banner.startswith(b"SSH-2.0-fake"), banner
+    s = socket.create_connection(LISTEN, timeout=6)
     s.sendall(b"SSH-2.0-client\r\n")
-    assert recv_until(s, b"\r\n") == b"SSH-2.0-client\r\n"
+    buf = read_until(s, lambda b: b.count(b"\r\n") >= 2)
     s.close()
+    assert b"SSH-2.0-fake" in buf, buf
+    assert b"SSH-2.0-client" in buf, buf
     return "raw SSH + echo"
 
 
 def case_proxy():
-    s = socket.create_connection(LISTEN, timeout=5)
+    s = socket.create_connection(LISTEN, timeout=6)
     s.sendall(b"PROXY TCP4 203.0.113.9 10.0.0.1 51234 109\r\nSSH-2.0-client\r\n")
-    banner = recv_until(s, b"\r\n")
-    assert banner.startswith(b"SSH-2.0-fake"), banner
-    assert recv_until(s, b"\r\n") == b"SSH-2.0-client\r\n"
+    buf = read_until(s, lambda b: b.count(b"\r\n") >= 2)
     s.close()
+    assert b"PROXY" not in buf, buf
+    assert b"SSH-2.0-fake" in buf, buf
+    assert b"SSH-2.0-client" in buf, buf
     return "PROXY v1 dibuang, banner tetap"
 
 
 def case_ws():
-    s = socket.create_connection(LISTEN, timeout=5)
+    s = socket.create_connection(LISTEN, timeout=6)
     key = base64.b64encode(b"0123456789abcdef").decode()
-    req = (
+    s.sendall((
         "GET /ssh-ws HTTP/1.1\r\n"
         "Host: test.local\r\n"
         "Upgrade: websocket\r\n"
         "Connection: Upgrade\r\n"
         "Sec-WebSocket-Key: %s\r\n"
         "Sec-WebSocket-Version: 13\r\n\r\n" % key
-    )
-    s.sendall(req.encode())
-    head = recv_until(s, b"\r\n\r\n")
-    assert b"101" in head.split(b"\r\n")[0], head
+    ).encode())
+    head = read_until(s, lambda b: b"\r\n\r\n" in b)
     expect = base64.b64encode(hashlib.sha1((key + GUID).encode()).digest()).decode()
+    assert b"101" in head.split(b"\r\n")[0], head
     assert expect.encode() in head, head
-    banner = recv_until(s, b"\r\n")
-    assert banner.startswith(b"SSH-2.0-fake"), banner
     s.sendall(b"ping-ws\r\n")
-    assert recv_until(s, b"\r\n") == b"ping-ws\r\n"
+    buf = read_until(s, lambda b: b"SSH-2.0-fake" in b and b"ping-ws" in b)
     s.close()
+    assert b"SSH-2.0-fake" in buf, buf
+    assert b"ping-ws" in buf, buf
     return "WebSocket 101 + tunnel"
 
 
 def case_connect():
-    s = socket.create_connection(LISTEN, timeout=5)
+    s = socket.create_connection(LISTEN, timeout=6)
     s.sendall(b"CONNECT test.local:443 HTTP/1.1\r\nHost: test.local\r\n\r\n")
-    head = recv_until(s, b"\r\n\r\n")
+    head = read_until(s, lambda b: b"\r\n\r\n" in b)
     assert b"200" in head.split(b"\r\n")[0], head
-    banner = recv_until(s, b"\r\n")
-    assert banner.startswith(b"SSH-2.0-fake"), banner
+    buf = read_until(s, lambda b: b"SSH-2.0-fake" in b)
     s.close()
+    assert b"SSH-2.0-fake" in buf, buf
     return "CONNECT 200 + tunnel"
+
+
+def case_reject_plain_http():
+    s = socket.create_connection(LISTEN, timeout=6)
+    s.sendall(b"GET / HTTP/1.1\r\nHost: test.local\r\n\r\n")
+    buf = read_until(s, lambda b: b"\r\n\r\n" in b)
+    s.close()
+    assert b"400" in buf.split(b"\r\n")[0], buf
+    return "HTTP biasa ditolak 400"
 
 
 def main():
     fake_ssh()
     proc = subprocess.Popen(
-        [sys.executable, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "assets", "sshws.py"),
+        [sys.executable, os.path.join(ROOT, "assets", "sshws.py"),
          "--listen", "%s:%d" % LISTEN, "--target", "%s:%d" % TARGET],
-        stderr=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
     )
     time.sleep(1.2)
+    failed = 0
     try:
-        for fn in (case_raw, case_proxy, case_ws, case_connect):
-            print("OK  " + fn())
+        for fn in (case_raw, case_proxy, case_ws, case_connect, case_reject_plain_http):
+            try:
+                print("OK   " + fn())
+            except AssertionError as exc:
+                failed += 1
+                print("FAIL %s: %r" % (fn.__name__, exc))
     finally:
         proc.terminate()
         try:
             proc.wait(timeout=5)
         except subprocess.TimeoutExpired:
             proc.kill()
-    return 0
+    return 1 if failed else 0
 
 
 if __name__ == "__main__":
