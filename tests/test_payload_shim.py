@@ -113,6 +113,13 @@ def main():
         resp3 = read_some(s)
         s.close()
         results.append(("bulk-101", b"101" in resp3))
+
+        # 4. proxy di depan membuang header Upgrade: PATCH tetap dianggap tunnel
+        s = socket.create_connection(("127.0.0.1", SHIM_PORT), 5)
+        s.sendall(b"PATCH / HTTP/1.1\r\nHost: vpn.contoh.com\r\n\r\n")
+        resp4 = read_some(s)
+        s.close()
+        results.append(("patch-tanpa-upgrade", b"101" in resp4))
     finally:
         proc.terminate()
         proc.wait(timeout=5)

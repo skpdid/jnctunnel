@@ -47,6 +47,10 @@ ROUTES = {
 }
 
 TUNNEL_METHODS = {"GET", "POST", "PATCH", "PUT", "HEAD", "OPTIONS"}
+# Method yang tetap dianggap percobaan tunnel walau proxy di depan (mis.
+# Cloudflare Worker) membuang header Upgrade/Connection.
+FORCE_METHODS = {m.strip().upper() for m in (os.environ.get("JNCT_SHIM_FORCE_METHODS")
+                                             or "PATCH,PUT").split(",") if m.strip()}
 
 # Penimpaan rute untuk pengujian: JNCT_SHIM_ROUTES="/upvmess=127.0.0.1:17004,..."
 for _item in (os.environ.get("JNCT_SHIM_ROUTES") or "").split(","):
@@ -59,10 +63,11 @@ for _item in (os.environ.get("JNCT_SHIM_ROUTES") or "").split(","):
 def read_proxy_header(sock):
     """Baca PROXY protocol v1 bila ada. Kembalikan (src_ip, dst_ip, sport, dport)."""
     try:
-        peek = sock.recv(1, socket.MSG_PEEK)
+        peek = sock.recv(6, socket.MSG_PEEK)
     except OSError:
         return None
-    if peek != b"P":
+    # "PATCH ..." juga dimulai dengan P - hanya "PROXY " yang dianggap header.
+    if not peek.startswith(b"PROXY "):
         return None
     line = b""
     while b"\r\n" not in line and len(line) < 108:
@@ -124,7 +129,14 @@ def hget(req, name):
 def is_upgrade(req):
     if req["method"] not in TUNNEL_METHODS:
         return False
-    return "upgrade" in hget(req, "connection").lower() or hget(req, "upgrade").lower() == "websocket"
+    if "upgrade" in hget(req, "connection").lower() or hget(req, "upgrade").lower() == "websocket":
+        return True
+    # PATCH/PUT adalah penanda payload umum; tetap dianggap tunnel supaya
+    # perantara (Cloudflare Worker) yang menghapus header Upgrade tidak
+    # membuat koneksi mati dengan 301/400.
+    if req["method"] in FORCE_METHODS and not hget(req, "content-length"):
+        return True
+    return False
 
 
 def build_upstream_request(req, path):
