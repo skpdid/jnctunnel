@@ -24,6 +24,9 @@ berat — semua kode bisa dibaca dalam beberapa menit.
 - **Backup harian** otomatis (03:30) + `jnctunnel-backup restore`
 - **udpgw badvpn** di port `7200` dan `7300` untuk UDP di sesi SSH/SSHWS
   (VC, game, DNS)
+- **Payload shim** untuk klien HTTP Custom / HTTP Injector yang mengirim
+  request umpan + `PATCH`/`GET` dengan `Upgrade: websocket` lalu penanda
+  `HTTP/ 69` (mode "HTTP Upgrade + payload")
 - **Kedaluwarsa otomatis** lewat systemd timer 5 menit
 - **Uninstaller** yang mengembalikan konfigurasi nginx/haproxy
 
@@ -55,12 +58,36 @@ Setelah selesai, jalankan `menu`.
 | 10004-10006 | Xray | HTTPUpgrade |
 | 11001-11003 | Xray | gRPC |
 | 12002 | Xray | XHTTP |
+| 80 | haproxy | HTTP + ACME, diteruskan ke payload shim |
 | 7200 | udpgw | UDP gateway untuk SSH/SSHWS |
 | 7300 | udpgw | UDP gateway untuk SSH/SSHWS |
 | 8088 | jnctunnel-api | API akun (lokal, token Bearer) |
+| 10007 | payload shim | penerjemah handshake ber-payload |
 | 10085 | Xray API | HandlerService untuk hot-add (dijaga iptables) |
 
 Semua port 2082/8083/8081/10001-12002 hanya listen di `127.0.0.1`.
+
+## Payload shim (HTTP Upgrade + payload)
+
+Klien seperti HTTP Custom/HTTP Injector sering mengirim payload:
+
+```
+GET / HTTP/1.1[crlf]Host: bug.example[crlf][crlf]PATCH / HTTP/1.1[crlf]Host: [host][crlf]Upgrade: websocket[crlf][crlf][split]HTTP/ 69[crlf][crlf]
+```
+
+- request pertama adalah umpan (decoy),
+- request kedua yang menentukan: method `PATCH`/`GET`, header `Upgrade: websocket`,
+- `HTTP/ 69` dikirim setelah handshake sebagai penanda.
+
+Xray hanya menerima `GET <path>` yang bersih, jadi `jnctunnel-shim.py` (port
+10007) membaca kedua request, membuang umpan, mengirim ulang sebagai `GET`
+rapi ke inbound yang sesuai, lalu membuang satu penanda `HTTP/ 69`.
+
+Path menentukan tujuan: `/upvmess` → 10004, `/upvless` → 10005,
+`/uptrojan` → 10006, `/vmess` → 10001, `/vless` → 10002, `/trojan` → 10003.
+Kalau payload memakai path lain (mis. `PATCH /`), dipakai `SHIM_DEFAULT_ROUTE`
+(bawaan `/upvmess`) — ubah di `/etc/jnctunnel/config.env` bila klien Anda
+memakai VLESS/Trojan.
 
 ## udpgw (badvpn)
 

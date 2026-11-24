@@ -112,7 +112,29 @@ install (`openssl rand -hex 24`) dan disimpan di `/etc/jnctunnel/config.env`.
 Timer harian 03:30. Restore otomatis membuat arsip pengaman dulu, lalu memuat
 ulang layanan.
 
-## 9. udpgw (badvpn)
+## 9. Payload shim
+
+`jnctunnel-shim.py` menerima seluruh trafik HTTP dari haproxy (port 80 dan 443
+setelah TLS dilepas) dan memutuskan:
+
+| Isi stream | Aksi |
+|---|---|
+| ada request `Upgrade: websocket` (method apa pun) | mode tunnel → `GET <path>` ke inbound Xray |
+| request biasa (API `/vps/`, ACME, 404) | diteruskan apa adanya ke nginx 8083 |
+| tidak ada data / bukan HTTP | koneksi ditutup |
+
+Detail penting:
+
+- Request umpan (`GET /` tanpa upgrade) dilewati; shim menunggu sampai 1,5
+  detik untuk request kedua sebelum memutuskan meneruskan ke nginx.
+- Method `PATCH`/`POST` diterima lalu dinormalisasi menjadi `GET` karena Xray
+  hanya menerima GET pada transport HTTPUpgrade/WS.
+- Penanda `HTTP/ 69\r\n\r\n` dibuang satu kali tepat setelah respons 101.
+- IP klien dari PROXY protocol diteruskan ulang ke nginx dalam bentuk PROXY v1.
+- nginx tidak lagi memegang port 80; ACME dilayani di blok 8083 dan certbot
+  memakai `--standalone` saat instalasi (haproxy/nginx dilepas sementara).
+
+## 10. udpgw (badvpn)
 
 `jnctunnel-udpgw@<port>.service` adalah unit template; dua instance aktif:
 `7200` dan `7300` (`UDPGW_PORTS` di `config.env`). ExecStart:
@@ -132,7 +154,7 @@ ulang layanan.
 - Tidak ada autentikasi di udpgw (memang begitu desain badvpn); siapa pun yang
   bisa menjangkau port itu bisa memakainya sebagai gateway UDP.
 
-## 10. Perintah harian
+## 11. Perintah harian
 
 ```bash
 menu                                  # kelola akun
@@ -146,16 +168,17 @@ jnctunnel-backup backup                     # backup manual
 jnctunnel-backup list                       # daftar arsip
 jnctunnel-apiguard                          # pasang ulang rule pengaman
 systemctl status jnctunnel-udpgw@7200       # status udpgw
+systemctl status jnctunnel-shim             # status payload shim
 /usr/local/sbin/jnctunnel-expire            # pembersihan manual
 ```
 
-## 11. Menambah protokol lain
+## 12. Menambah protokol lain
 
 1. Tambahkan inbound baru di `/etc/jnctunnel/xray.base.json` (listen 127.0.0.1).
 2. Tambahkan `location` yang sesuai di vhost nginx.
 3. Jalankan `python3 /usr/local/sbin/xray-sync.py && systemctl restart jnctunnel-xray`.
 
-## 12. Tidak ada panggilan keluar setelah terpasang
+## 13. Tidak ada panggilan keluar setelah terpasang
 
 - Tidak ada lisensi/lease/aktivasi, tidak ada kunci atau tanda tangan vendor.
 - Tidak ada heartbeat, callback instalasi, atau notifikasi ke pihak mana pun.
@@ -163,7 +186,7 @@ systemctl status jnctunnel-udpgw@7200       # status udpgw
   membaca `/etc/jnctunnel/accounts`.
 - IP server ditampilkan dari `ip -4 route get` (lokal, tanpa paket keluar).
 
-## 13. Yang sengaja tidak ada
+## 14. Yang sengaja tidak ada
 
 - Lisensi / lease / kill switch
 - Update paksa dari server luar (god mode)

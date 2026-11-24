@@ -1,0 +1,20 @@
+[Unit]
+Description=jnctunnel payload shim (HTTPUpgrade/WebSocket ber-payload)
+Documentation=https://github.com/skpdid/jnctunnel
+After=network-online.target
+Wants=network-online.target
+Before=haproxy.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /usr/local/sbin/jnctunnel-shim.py
+Restart=always
+RestartSec=2
+NoNewPrivileges=true
+PrivateTmp=true
+LimitNOFILE=65536
+StandardOutput=null
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

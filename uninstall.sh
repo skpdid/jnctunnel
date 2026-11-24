@@ -10,7 +10,7 @@ PURGE=0
 [ "$(id -u)" -eq 0 ] || { echo "jalankan sebagai root"; exit 1; }
 
 echo "[jnctunnel] menghentikan layanan"
-for s in jnctunnel-xray jnctunnel-sshws jnctunnel-api jnctunnel-apiguard \
+for s in jnctunnel-xray jnctunnel-sshws jnctunnel-api jnctunnel-apiguard jnctunnel-shim \
          jnctunnel-backup.timer jnctunnel-expire.timer jnctunnel-expire.service \
          jnctunnel-backup.service jnctunnel-udpgw@7200 jnctunnel-udpgw@7300; do
   systemctl disable --now "${s}" >/dev/null 2>&1 || true
@@ -41,7 +41,8 @@ rm -rf /etc/jnctunnel /usr/local/etc/xray/config.json
 rm -f /usr/local/sbin/sshws.py /usr/local/sbin/xray-sync.py \
       /usr/local/sbin/jnctunnel-expire /usr/local/sbin/jnctunnel-apply \
       /usr/local/sbin/jnctunnel-apiguard /usr/local/sbin/jnctunnel-backup \
-      /usr/local/sbin/jnctunnel-api.py /usr/local/sbin/menu-jnctunnel
+      /usr/local/sbin/jnctunnel-api.py /usr/local/sbin/jnctunnel-shim.py \
+      /usr/local/sbin/menu-jnctunnel
 rm -f /usr/local/sbin/menu
 rm -f /usr/local/bin/xray
 

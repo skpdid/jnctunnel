@@ -69,8 +69,7 @@
       "streamSettings": {
         "network": "httpupgrade",
         "httpupgradeSettings": {
-          "path": "/upvmess",
-          "host": "@DOMAIN@"
+          "path": "/upvmess"
         }
       }
     },
@@ -86,8 +85,7 @@
       "streamSettings": {
         "network": "httpupgrade",
         "httpupgradeSettings": {
-          "path": "/upvless",
-          "host": "@DOMAIN@"
+          "path": "/upvless"
         }
       }
     },
@@ -102,8 +100,7 @@
       "streamSettings": {
         "network": "httpupgrade",
         "httpupgradeSettings": {
-          "path": "/uptrojan",
-          "host": "@DOMAIN@"
+          "path": "/uptrojan"
         }
       }
     },
@@ -166,8 +163,8 @@
         "network": "xhttp",
         "xhttpSettings": {
           "path": "/xhvless",
-          "host": "@DOMAIN@",
-          "mode": "auto"
+          "mode": "auto",
+          "scMaxBufferedPosts": 16
         }
       }
     }

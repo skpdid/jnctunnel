@@ -181,6 +181,7 @@ write_configs() {
   install -m 755 "${REPO_DIR}/jnctunnel-apiguard" /usr/local/sbin/jnctunnel-apiguard
   install -m 755 "${REPO_DIR}/jnctunnel-backup" /usr/local/sbin/jnctunnel-backup
   install -m 755 "${ASSETS}/api.py" /usr/local/sbin/jnctunnel-api.py
+  install -m 755 "${ASSETS}/payload-shim.py" /usr/local/sbin/jnctunnel-shim.py
   install -m 755 "${REPO_DIR}/menu.sh" /usr/local/sbin/menu-jnctunnel
   ln -sf /usr/local/sbin/menu-jnctunnel /usr/local/sbin/menu
 
@@ -194,6 +195,7 @@ write_configs() {
   install -m 644 "${ASSETS}/systemd/jnctunnel-backup.service" /etc/systemd/system/
   install -m 644 "${ASSETS}/systemd/jnctunnel-backup.timer" /etc/systemd/system/
   install -m 644 "${ASSETS}/systemd/jnctunnel-udpgw@.service" /etc/systemd/system/
+  install -m 644 "${ASSETS}/systemd/jnctunnel-shim.service" /etc/systemd/system/
 
   # nginx
   sed "s|@DOMAIN@|${DOMAIN}|g" "${ASSETS}/nginx-jnctunnel.conf" \
@@ -242,9 +244,12 @@ setup_cert() {
     else
       say "meminta sertifikat Let's Encrypt untuk ${DOMAIN}"
       DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends certbot >/dev/null 2>&1 || true
-      systemctl reload nginx 2>/dev/null || systemctl start nginx 2>/dev/null || true
+      # port 80 harus bebas: haproxy & nginx dilepas sementara, certbot memakai
+      # --standalone supaya tidak bergantung pada vhost yang belum siap.
+      systemctl stop haproxy >/dev/null 2>&1 || true
+      systemctl stop nginx >/dev/null 2>&1 || true
       if command -v certbot >/dev/null 2>&1 && \
-         certbot certonly --webroot -w /var/www/html -d "${DOMAIN}" \
+         certbot certonly --standalone -d "${DOMAIN}" \
            --non-interactive --agree-tos -m "${EMAIL}" --keep-until-expiring >/dev/null 2>&1; then
         have_le=1
         ok "sertifikat Let's Encrypt siap"
@@ -284,6 +289,7 @@ start_services() {
   systemctl enable --now jnctunnel-apiguard >/dev/null 2>&1 || /usr/local/sbin/jnctunnel-apiguard || true
   systemctl enable --now dropbear >/dev/null 2>&1 || systemctl restart dropbear
   systemctl enable --now nginx >/dev/null 2>&1 || systemctl restart nginx
+  systemctl enable --now jnctunnel-shim >/dev/null 2>&1 || systemctl restart jnctunnel-shim
   systemctl enable --now haproxy >/dev/null 2>&1 || systemctl restart haproxy
   systemctl enable --now jnctunnel-xray >/dev/null 2>&1 || systemctl restart jnctunnel-xray
   systemctl enable --now jnctunnel-sshws >/dev/null 2>&1 || systemctl restart jnctunnel-sshws
@@ -333,9 +339,8 @@ install_udpgw || true
 install_xray
 write_configs
 systemctl daemon-reload
-# nginx harus hidup dulu agar ACME di port 80 bisa dijawab
-systemctl enable --now nginx >/dev/null 2>&1 || systemctl restart nginx
 setup_cert
+systemctl enable --now nginx >/dev/null 2>&1 || systemctl restart nginx
 setup_haproxy
 start_services
 summary
