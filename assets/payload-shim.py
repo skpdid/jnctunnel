@@ -44,6 +44,12 @@ ROUTES = {
     "/vmess": "127.0.0.1:10001",
     "/vless": "127.0.0.1:10002",
     "/trojan": "127.0.0.1:10003",
+    # SSH over WebSocket - jangan jatuh ke default (/upvmess) atau klien SSH
+    # akan diarahkan ke inbound Xray dan tidak pernah melihat banner SSH.
+    "/ssh-ws": "127.0.0.1:2082",
+    "/ws": "127.0.0.1:2082",
+    "/ws-ssh": "127.0.0.1:2082",
+    "/ssh": "127.0.0.1:2082",
 }
 
 TUNNEL_METHODS = {"GET", "POST", "PATCH", "PUT", "HEAD", "OPTIONS"}
