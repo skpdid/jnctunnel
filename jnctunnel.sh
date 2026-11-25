@@ -288,9 +288,22 @@ start_services() {
   # guard port API Xray harus aktif sebelum xray naik
   systemctl enable --now jnctunnel-apiguard >/dev/null 2>&1 || /usr/local/sbin/jnctunnel-apiguard || true
   systemctl enable --now dropbear >/dev/null 2>&1 || systemctl restart dropbear
-  systemctl enable --now nginx >/dev/null 2>&1 || systemctl restart nginx
-  systemctl enable --now jnctunnel-shim >/dev/null 2>&1 || systemctl restart jnctunnel-shim
-  systemctl enable --now haproxy >/dev/null 2>&1 || systemctl restart haproxy
+  # restart, bukan "enable --now": kalau layanan sudah jalan dengan config lama,
+  # enable --now tidak memuat config baru dan port 80 tetap dipegang nginx.
+  systemctl enable nginx >/dev/null 2>&1 || true
+  if nginx -t >/dev/null 2>&1; then
+    systemctl restart nginx
+  else
+    warn "config nginx tidak valid, nginx tidak direstart"
+  fi
+  systemctl enable jnctunnel-shim >/dev/null 2>&1 || true
+  systemctl restart jnctunnel-shim
+  systemctl enable haproxy >/dev/null 2>&1 || true
+  if haproxy -c -f /etc/haproxy/haproxy.cfg >/dev/null 2>&1; then
+    systemctl restart haproxy
+  else
+    warn "config haproxy tidak valid, haproxy tidak direstart"
+  fi
   systemctl enable --now jnctunnel-xray >/dev/null 2>&1 || systemctl restart jnctunnel-xray
   systemctl enable --now jnctunnel-sshws >/dev/null 2>&1 || systemctl restart jnctunnel-sshws
   systemctl enable --now jnctunnel-api >/dev/null 2>&1 || systemctl restart jnctunnel-api
@@ -340,7 +353,8 @@ install_xray
 write_configs
 systemctl daemon-reload
 setup_cert
-systemctl enable --now nginx >/dev/null 2>&1 || systemctl restart nginx
+systemctl enable nginx >/dev/null 2>&1 || true
+nginx -t >/dev/null 2>&1 && systemctl restart nginx
 setup_haproxy
 start_services
 summary
