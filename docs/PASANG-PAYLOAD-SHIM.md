@@ -62,7 +62,8 @@ ExecStart=/usr/bin/python3 /usr/local/sbin/payload-shim.py \
   --route /shadowsocks=127.0.0.1:20004 \
   --default /vmess-upgrade \
   --fallback 127.0.0.1:10100 \
-  --proxy-protocol
+  --proxy-protocol \
+  --unknown-upgrade fallback
 Restart=always
 LimitNOFILE=65536
 
@@ -74,6 +75,11 @@ WantedBy=multi-user.target
 systemctl daemon-reload && systemctl enable --now payload-shim
 ```
 
+`--unknown-upgrade fallback` penting di script ini: SSH-WS Anda memakai path
+`/` (catch-all nginx ke `10015`). Dengan opsi ini, `GET /` ber-Upgrade tetap
+diteruskan ke nginx (SSH-WS jalan), sedangkan `PATCH /` tetap dianggap payload
+dan diarahkan ke Xray. Tanpa opsi ini, SSH-WS akan ikut masuk ke Xray.
+
 Catatan: `--fallback 10100` memakai `--proxy-protocol` karena nginx Anda
 `listen 127.0.0.1:10100 proxy_protocol`. Shim akan mengirim header PROXY v1
 ke nginx, sama seperti haproxy sekarang.
@@ -83,12 +89,27 @@ Kalau klien Anda VLESS, ganti `--default /vless-upgrade`; Trojan →
 
 ## Langkah 2 - haproxy mengarahkan HTTP/1.1 ke shim
 
-Bagian yang sekarang meneruskan ke `127.0.0.1:10100` diganti ke `10007`:
+File `examples/haproxy-xd.cfg` sudah berisi versi yang sudah dipatch. Ringkasnya:
 
 ```haproxy
-backend bk_http
+frontend http
+    default_backend payload_shim          # sebelumnya nginx_http
+
+frontend https
+    use_backend nginx_https if is_h2      # gRPC tetap langsung
+    use_backend payload_shim if is_h1
+    use_backend payload_shim if is_up or is_ws
+    use_backend payload_shim if xray
+    use_backend nginx_http if is_sni
+    default_backend payload_shim
+
+backend payload_shim
+    mode tcp
     server shim 127.0.0.1:10007 send-proxy
 ```
+
+Urutan `use_backend` penting: baris pertama yang cocok menang, jadi `is_h2`
+harus tetap di atas.
 
 Yang **tidak** berubah:
 

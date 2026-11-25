@@ -190,12 +190,13 @@ def read_response(sock):
 
 
 class Shim:
-    def __init__(self, routes, default_path, fallback, magic, use_proxy):
+    def __init__(self, routes, default_path, fallback, magic, use_proxy, unknown_upgrade="tunnel"):
         self.routes = routes
         self.default_path = default_path
         self.fallback = fallback
         self.magic = magic
         self.use_proxy = use_proxy
+        self.unknown_upgrade = unknown_upgrade
 
     def tunnel(self, downstream, req, leftover):
         path = req["path"] if req["path"] in self.routes else self.default_path
@@ -235,6 +236,15 @@ class Shim:
                 upstream.close()
             except OSError:
                 pass
+
+    def is_tunnel(self, req):
+        if req["path"] in self.routes:
+            return True
+        if req["method"] in FORCE_METHODS:
+            return True
+        # GET/POST ber-Upgrade ke path yang tidak dikenal: bisa jadi SSH-WS
+        # atau layanan lain di belakang nginx, jadi bisa dialihkan ke fallback.
+        return self.unknown_upgrade == "tunnel"
 
     def forward(self, downstream, raw, src):
         if not self.fallback:
@@ -301,7 +311,7 @@ class Shim:
                     rest += chunk
                 body, rest = rest[:length], rest[length:]
 
-                if is_upgrade(req):
+                if is_upgrade(req) and self.is_tunnel(req):
                     self.tunnel(downstream, req, rest)
                     return
                 if not self.forward(downstream, head + b"\r\n\r\n" + body, src):
@@ -344,6 +354,9 @@ def main():
     ap.add_argument("--fallback", default="")
     ap.add_argument("--proxy-protocol", action="store_true")
     ap.add_argument("--magic", default="HTTP/ 69\\r\\n\\r\\n")
+    ap.add_argument("--unknown-upgrade", choices=("tunnel", "fallback"), default="tunnel",
+                    help="path Upgrade yang tidak terdaftar: kirim ke default (tunnel) "
+                         "atau ke nginx (fallback)")
     args = ap.parse_args()
 
     routes = {}
@@ -352,7 +365,8 @@ def main():
         routes[path.strip()] = addr.strip()
     magic = args.magic.encode().decode("unicode_escape").encode("latin-1")
 
-    Shim(routes, args.default, args.fallback, magic, args.proxy_protocol).serve(args.listen)
+    Shim(routes, args.default, args.fallback, magic, args.proxy_protocol,
+         args.unknown_upgrade).serve(args.listen)
 
 
 if __name__ == "__main__":
